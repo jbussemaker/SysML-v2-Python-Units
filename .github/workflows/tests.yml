@@ -36,3 +36,5 @@ jobs:
 
     - name: Test with pytest
       run: pytest --durations=0
+      env:
+        SYSIDE_LICENSE_KEY: ${{ secrets.SYSIDE_LICENSE_KEY }}
