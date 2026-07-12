@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=80.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sysmlv2-units"
+authors = [{name = "Jasper Bussemaker", email = "jasper.bussemaker@dlr.de"}]
+description = "SysML v2 Python Units"
+readme = "README.md"
+license-files = ["LICENSE"]
+keywords = ["sysmlv2", "units", "quantities", "syside", "pint"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Programming Language :: Python :: 3",
+]
+dynamic = ["version"]
+requires-python = ">=3.12"
+dependencies = [
+    "syside",
+    "pint",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest"
+]
+
+[tool.setuptools.dynamic]
+version = {attr = "sysmlv2_units.__version__"}
+
+[tool.setuptools.packages.find]
+exclude = [
+    "tests*",
+]
+namespaces = false

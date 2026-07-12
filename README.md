@@ -1,4 +1,4 @@
-# SysML-v2-Python-Units
+# SysML v2 Python Units
 
 Convert units and quantities between standard [SysML v2](https://www.omg.org/sysml/sysmlv2/) and Python with
 [Syside Automator](https://docs.sensmetry.com/automator/) and [Pint](https://pint.readthedocs.io/).
@@ -21,7 +21,7 @@ For academic uses you can request an [academic license](https://sensmetry.com/sy
 
 1. Install the package from PyPI:
    ```
-   pip install sysml-v2-units
+   pip install sysmlv2-units
    ```
    Note: currently Syside Automator only supports Python 3.12
 2. Make sure you [activate Syside Automator](https://docs.sensmetry.com/automator/install.html#activate-license)
