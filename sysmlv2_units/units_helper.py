@@ -42,7 +42,7 @@ class SysMLUnitsHelper:
 
     _sysml_quantities_units_map: Dict[str, str] = {}  # quantity attr key --> units attr key
 
-    _do_log = True
+    do_log = False
 
     def __init__(self, model: syside.Model):
         doc_namespace_map = {}
@@ -526,14 +526,14 @@ class SysMLUnitsHelper:
         units_attr_str = f'<{units_attr.short_name or ""}> {units_attr.name}' \
             if isinstance(units_attr, syside.AttributeUsage) else units_attr
         if pint_units is not None:
-            if cls._do_log:
+            if cls.do_log:
                 log.debug(f'Converted SysML units "{units_attr_str}" to pint units "<{pint_units:~P}> {pint_units:P}"')
 
             cls._cache_units_map(pint_units, units_attr)
             return pint_units
 
         # No units were found
-        if cls._do_log:
+        if cls.do_log:
             log.debug(f'Could not convert SysML units "{units_attr_str}" to pint units')
         if cache_unknown:
             cls._cache_units_map(_UNKNOWN_UNIT, units_attr)
@@ -597,13 +597,13 @@ class SysMLUnitsHelper:
                 assert units_attr != self.dimensionless_units_sysml
 
                 self._cache_units_map(units, units_attr)
-                if self.__class__._do_log:
+                if self.__class__.do_log:
                     log.debug(f'Converted pint units "<{units:~P}> {units:P}" '
                               f'to SysML units "<{units_attr.short_name or ""}> {units_attr.name}"')
                 return units_attr
 
         # Remember that the search was unsuccessful
-        if self.__class__._do_log:
+        if self.__class__.do_log:
             log.debug(f'Could not convert pint units "<{units:~P}> {units:P}" to SysML units')
         if cache_unknown:
             self._cache_units_map(units, _UNKNOWN_UNIT)
@@ -647,7 +647,7 @@ class SysMLUnitsHelper:
             if raise_if_unknown_unit:
                 raise UndefinedUnitError(units)
 
-        if cls._do_log:
+        if cls.do_log:
             log.debug(f'Could not parse "{units}" to pint units')
 
     def quantity(self, value: float, units: Unit = None) -> Quantity:
@@ -804,11 +804,11 @@ class SysMLUnitsHelper:
             del sysml_alias_map[units_attr_key]
 
         # Map all SysML units to pint units (more robust, because compound pint units are order-independent)
-        cls._do_log = False
+        cls.do_log = False
         for units_attr_key in sysml_alias_map:
             cls.get_python_units(units_attr_key, raise_if_unknown_unit=False)
 
-        cls._do_log = True
+        cls.do_log = True
 
     @staticmethod
     @register_unit_format('S')
@@ -926,7 +926,7 @@ class SysMLUnitsHelper:
 
         # Check if the units were found
         if pint_units is not None:
-            if self._do_log:
+            if self.do_log:
                 log.debug(f'Found default pint units for SysML quantity "{quantity_value_str}": '
                           f'"<{pint_units:~P}> {pint_units:P}"')
 
@@ -937,7 +937,7 @@ class SysMLUnitsHelper:
             return pint_units
 
         # No units were found
-        if self._do_log:
+        if self.do_log:
             log.debug(f'Could not convert SysML units "{quantity_value_str}" to pint units')
         self._sysml_quantities_units_map[quantity_value_key] = _UNKNOWN_UNIT
 
