@@ -322,48 +322,6 @@ class SysMLUnitsHelper:
 
         raise ValueError(f'Could not parse simple expression: {expression}')
 
-    ################################
-    ### SysML printing functions ###
-    ################################
-
-    @classmethod
-    def to_text(cls, element: syside.Element, printer_config: syside.PrinterConfig = None):
-        """
-        Render an element as SysML v2 textual notation, using the units ReferencePrinter so that units are printed
-        using their short names.
-
-        Note: this only works if a UnitsHelper has been instantiated at least once (to initialize the caches).
-        """
-
-        # Get printer config
-        if printer_config is None:
-            printer_config = syside.PrinterConfig(line_width=120, tab_width=4)
-
-        # Get the reference printer
-        reference_printer = cls.get_reference_printer()
-
-        # Create the printer and print the model
-        printer = syside.ModelPrinter.sysml(reference_printer=reference_printer)
-        sysml_text = syside.pprint(element, printer, printer_config)
-
-        return sysml_text
-
-    @classmethod
-    def get_reference_printer(cls) -> syside.ReferencePrinter:
-        """Returns a reference printer that prints references to units using their short name."""
-        alias_map = cls._sysml_alias_map
-
-        def get_name_pref(target: syside.Element, referent: syside.Element) -> syside.NamePreference:
-            # Check if the target is a unit
-            if target.__class__ == syside.AttributeUsage:
-                units_attr_key = cls._sysml_attr_key(target)
-                if units_attr_key in alias_map:
-                    return syside.NamePreference.Shortest
-
-            return syside.NamePreference.Regular
-
-        return syside.ReferencePrinter(get_name_pref)
-
     #######################################################################
     ### Python (pint/str) to SysML conversion functions (SysML setters) ###
     #######################################################################
@@ -483,6 +441,48 @@ class SysMLUnitsHelper:
 
         else:
             raise ValueError(f'Could not set simple value: {value}')
+
+    ################################
+    ### SysML printing functions ###
+    ################################
+
+    @classmethod
+    def to_text(cls, element: syside.Element, printer_config: syside.PrinterConfig = None):
+        """
+        Render an element as SysML v2 textual notation, using the units ReferencePrinter so that units are printed
+        using their short names.
+
+        Note: this only works if a UnitsHelper has been instantiated at least once (to initialize the caches).
+        """
+
+        # Get printer config
+        if printer_config is None:
+            printer_config = syside.PrinterConfig(line_width=120, tab_width=4)
+
+        # Get the reference printer
+        reference_printer = cls.get_reference_printer()
+
+        # Create the printer and print the model
+        printer = syside.ModelPrinter.sysml(reference_printer=reference_printer)
+        sysml_text = syside.pprint(element, printer, printer_config)
+
+        return sysml_text
+
+    @classmethod
+    def get_reference_printer(cls) -> syside.ReferencePrinter:
+        """Returns a reference printer that prints references to units using their short name."""
+        alias_map = cls._sysml_alias_map
+
+        def get_name_pref(target: syside.Element, referent: syside.Element) -> syside.NamePreference:
+            # Check if the target is a unit
+            if target.__class__ == syside.AttributeUsage:
+                units_attr_key = cls._sysml_attr_key(target)
+                if units_attr_key in alias_map:
+                    return syside.NamePreference.Shortest
+
+            return syside.NamePreference.Regular
+
+        return syside.ReferencePrinter(get_name_pref)
 
     ###########################################
     ### Unit conversion / parsing functions ###

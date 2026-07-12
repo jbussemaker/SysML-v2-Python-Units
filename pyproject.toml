@@ -25,6 +25,11 @@ dependencies = [
 test = [
     "pytest"
 ]
+nb = [
+    "jupyter",
+    "ipython",
+    "ipykernel",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "sysmlv2_units.__version__"}
