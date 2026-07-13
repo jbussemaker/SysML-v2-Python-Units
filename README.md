@@ -9,16 +9,16 @@ Convert units and quantities between standard [SysML v2](https://www.omg.org/sys
 
 - Get/set quantity* as `attribute` value, specified using Pint `Quantity` objects
 - Get/set unit as `attribute` value, specified using Pint `Unit` objects
-- Supports numerical values/magnitudes, as well as `inf` (`*` in SysML v2) and `NaN` (set as `null` in SysML v2)
+- Supports numerical values, as well as `inf` (`*` in SysML v2) and `NaN` (set as `null` in SysML v2)
 - Conversion functions between SysML v2 units and Pint `Unit`, and string parsing functions
-- Derive base units for a quantity type, for example `kg` for an `ISQ::mass` quantity
+- Derive preferred units for a quantity type, for example `kg` for an `ISQ::mass` quantity
 - Syside Automator [`ReferencePrinter`](https://docs.sensmetry.com/python/latest/syside/ReferencePrinter.html) for
   printing unit references using their short name
 - Extensive caching to make units lookup fast
 
 *: a quantity is a combination of a numerical value (the "magnitude") and units, for example: `10 kg`, `-1.0 m/s**2`.
 
-Note: this package uses [Syside Automator](https://docs.sensmetry.com/automator/) for parsing SysMl v2 models.
+Note: this package uses [Syside Automator](https://docs.sensmetry.com/automator/) for parsing SysML v2 models.
 Syside Automator is commercial software, so you have to obtain a license first.
 For academic uses you can request an [academic license](https://sensmetry.com/syside-pricing/).
 
@@ -37,7 +37,7 @@ Refer to [the documentation](https://github.com/jbussemaker/SysML-v2-Python-Unit
 
 ## Citing
 
-If you use this library in your work, please cite the paper first introducing these capabilities:
+If you use this library in your work, please cite the paper that first introduces the use of these capabilities:
 
 Bussemaker, J.H. et al., 2026, April.
 System Architecture Optimization Using SysML v2: Language Extension and Implementation.
@@ -56,5 +56,5 @@ Contributions are appreciated too:
 - Add your contributions to the fork
   - Update/add documentation
   - Add tests and make sure they pass (tests are run using `pytest`)
-- Read and sign a Contributor License Agreement (CLA): *please contact me for the template*
+- Sign a Contributor License Agreement (CLA): *please contact me for the template*
 - Issue a pull request
