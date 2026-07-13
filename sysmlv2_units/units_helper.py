@@ -42,11 +42,41 @@ class SysMLUnitsHelper:
 
     _sysml_quantities_units_map: Dict[str, str] = {}  # quantity attr key --> units attr key
 
+    _explicit_units_map = [  # Pint -> SysML
+        ('degC', '°C_abs'),
+        ('delta_degC', '°C'),
+        ('degF', '°F_abs'),
+        ('delta_degF', '°F'),
+        ('kph', 'km/h'),
+        ('mph', 'mph'),
+        ('VA', 'V⋅A'),
+        ('Wh', 'W⋅h'),
+        ('m/s²', 'm/s²'),
+    ]
+
+    _units_remove_list = [  # Duplicate SysML units or otherwise wrongly-interpreted units
+        'var',  # V*A
+        'octet',  # byte
+        'octet per second',  # byte per second
+        'm²⋅A',  # A*m**2
+        'ua',  # astronomical unit, conflict with microyear in pint
+        'J⋅s⁻¹',  # J/s
+        'm⋅s⁻¹',  # m/s
+        'mol⋅kg⁻¹',  # mol/kg
+        'mol⋅m⁻³',  # mol/m3
+        'ft⋅lbf',
+        'kg⁻¹⋅s⋅A',
+        'lbf⋅in/in',
+        'circular mil',
+        'unit pole',
+    ]
+
     do_log = False
 
     def __init__(self, model: syside.Model):
         doc_namespace_map = {}
 
+        # Load some base elements from the SysML standard library
         self.unit_base_def = self._get_element_by_qualified_name(model, doc_namespace_map,
             'MeasurementReferences::MeasurementUnit', syside.AttributeDefinition, env=True)
         self.scale_base_def = self._get_element_by_qualified_name(model, doc_namespace_map,
@@ -61,6 +91,7 @@ class SysMLUnitsHelper:
             'MeasurementReferences::one', syside.AttributeUsage, env=True)
         self.__class__.dimensionless_units_sysml_key = self._sysml_attr_key(self.dimensionless_units_sysml)
 
+        # Load the units libraries and initialize unit mapping caches
         self.units_libraries = [
             self._search_namespace(model, doc_namespace_map, 'SI', env=True),
             self._search_namespace(model, doc_namespace_map, 'USCustomaryUnits', env=True),
@@ -68,6 +99,7 @@ class SysMLUnitsHelper:
         sysml_alias_map, sysml_units_map, self._sysml_obj_map = self._get_sysml_units_map()
         self._init_mappings(sysml_units_map, sysml_alias_map)
 
+        # Initialize mapping from quantity value types to default units
         if len(self.__class__._sysml_quantities_units_map) == 0:
             isq = self._get_element_by_qualified_name(
                 model, doc_namespace_map, 'ISQBase::isq', syside.AttributeUsage, env=True)
@@ -82,6 +114,7 @@ class SysMLUnitsHelper:
 
             self.__class__._sysml_quantities_units_map = self._map_base_quantities(isq, si, dimensionless_quantities)
 
+        # Check if all base elements were found
         if any([prop is None for prop in [
             self.unit_base_def,
             self.scale_base_def,
@@ -112,12 +145,16 @@ class SysMLUnitsHelper:
         if is_negation:
             value = -value
 
+        # Return a Pint quantity object
         return self.quantity(value, units)
 
     def get_units(self, feature: Union[syside.Feature, syside.Expression], raise_if_unknown_unit=True) \
             -> Tuple[Optional[Unit], Optional[syside.AttributeUsage]]:
         """
-        Converts a unit-reference feature value to a Python/pint unit.
+        Gets the Pint units as set as a feature value or as part of a quantity expression.
+        If none found but the feature derives from a quantity value base type, the preferred associated units are
+        returned.
+
         Also returns the original units attribute that was set (if applicable).
         """
 
@@ -127,6 +164,7 @@ class SysMLUnitsHelper:
 
             # If not, check if the feature itself is a unit
             if isinstance(feature, syside.AttributeUsage):
+                # Check if the value is the dimensionless unit
                 if feature == self.dimensionless_units_sysml:
                     return None, None
 
@@ -135,13 +173,14 @@ class SysMLUnitsHelper:
                     preferred_units = self.get_quantity_value_units(feature, raise_if_unknown_unit=raise_if_unknown_unit)
                     return preferred_units, None
 
-                # Directly try to parse the unit
+                # Directly try to parse a unit set as the feature value
                 parsed_units, units_attr = self._parse_units_attr(feature, raise_if_unknown_unit=raise_if_unknown_unit)
                 if parsed_units is not None:
                     return parsed_units, units_attr
 
             raise ValueError(f'No feature value set on feature: {feature}')
 
+        # Parse the unit that is part of a quantity
         _, _, units, units_attr = self._get_feature_value_units(feature, raise_if_unknown_unit=raise_if_unknown_unit)
         return units, units_attr
 
@@ -152,6 +191,7 @@ class SysMLUnitsHelper:
         Returns the (contained) feature that contains the value, so that should still be parsed.
         """
 
+        # Get the value expression to parse
         if isinstance(feature, syside.Expression):
             value_expression = feature
         else:
@@ -174,11 +214,13 @@ class SysMLUnitsHelper:
                 and value_expression.operator == syside.Operator.Quantity
                 and len(value_expression.children) == 2):
 
+            # Extract the child parameters of the expression
             units_feature: syside.Feature
             value_feature, units_feature = value_expression.children.elements
 
             value_expression = value_feature.feature_value.value
 
+            # Parse the units from the second parameter
             units, units_attr = self._parse_units_feature(units_feature, raise_if_unknown_unit=raise_if_unknown_unit)
 
         # Otherwise try to directly parse the value expression as units
@@ -200,6 +242,7 @@ class SysMLUnitsHelper:
         Additionally, returns the units attribute that was set to define the unit if applicable.
         """
 
+        # Get the expression to parse
         if isinstance(units_feature, syside.Expression):
             units_expression = units_feature
         else:
@@ -207,16 +250,17 @@ class SysMLUnitsHelper:
 
         # Parse a referenced units attribute, e.g.: SI::m
         if isinstance(units_expression, syside.FeatureReferenceExpression):
-            # Convert to pint units
+
+            # Get the referenced units attribute
             units_attr = units_expression.referent
             if not isinstance(units_attr, syside.AttributeUsage):
                 return None, None
 
-            # Parse the units attr
+            # Parse the units attr to Pint units
             units, _ = self._parse_units_attr(units_attr, raise_if_unknown_unit=raise_if_unknown_unit)
             return units, units_attr
 
-        # Parse an exponential (as part of parsing a units expression)
+        # Parse an exponent value (as part of parsing a units expression)
         if (isinstance(units_expression, syside.LiteralInteger) or
                 (isinstance(units_expression, syside.OperatorExpression)
                  and units_expression.operator == syside.Operator.Minus)):
@@ -228,9 +272,11 @@ class SysMLUnitsHelper:
         if (isinstance(units_expression, syside.OperatorExpression) and
                 units_expression.operator in self._binary_operators and len(units_expression.children) == 2):
 
+            # Get the left and right side features and the operator str
             left_side_feature, right_side_feature = units_expression.children.elements
             operator_str = self._binary_operators[units_expression.operator]
 
+            # Parse the left and right side features into units or literal values
             left_side_units, _ = self._parse_units_feature(
                 left_side_feature, raise_if_unknown_unit=raise_if_unknown_unit)
             right_side_units, _ = self._parse_units_feature(
@@ -243,7 +289,7 @@ class SysMLUnitsHelper:
             if left_side_units is None:
                 left_side_units = self.dimensionless_units_pint
 
-            # Parse python units
+            # Parse Pint units
             left_str = f'{left_side_units:~C}' if isinstance(left_side_units, Unit) else str(left_side_units)
             right_str = f'{right_side_units:~C}' if isinstance(right_side_units, Unit) else str(right_side_units)
             units = self.parse_python_units(' '.join([left_str, operator_str, right_str]))
@@ -406,6 +452,7 @@ class SysMLUnitsHelper:
 
     @staticmethod
     def _set_minus_operator(feature: syside.Feature) -> syside.Feature:
+        """Create a new minus operator expression and return the value-containing feature."""
 
         expression: syside.OperatorExpression
         _, expression = feature.feature_value_member.set_member_element(syside.OperatorExpression)
@@ -424,17 +471,20 @@ class SysMLUnitsHelper:
             value_feature = cls._set_minus_operator(value_feature)
             value = -value
 
-        # Set actual value
+        # Set infinity value
         if math.isinf(value):
             value_feature.feature_value_member.set_member_element(syside.LiteralInfinity)
 
+        # Set NaN value (null)
         elif value is None or math.isnan(value):
             value_feature.feature_value_member.set_member_element(syside.NullExpression)
 
+        # Set integer value
         elif isinstance(value, int):
             _, literal = value_feature.feature_value_member.set_member_element(syside.LiteralInteger)
             literal.value = value
 
+        # Set float (rational) value
         elif isinstance(value, float):
             _, literal = value_feature.feature_value_member.set_member_element(syside.LiteralRational)
             literal.value = value
@@ -478,8 +528,10 @@ class SysMLUnitsHelper:
             if target.__class__ == syside.AttributeUsage:
                 units_attr_key = cls._sysml_attr_key(target)
                 if units_attr_key in alias_map:
+                    # Tell the printer that we want to print the reference using the short name
                     return syside.NamePreference.Shortest
 
+            # Otherwise print using regular settings
             return syside.NamePreference.Regular
 
         return syside.ReferencePrinter(get_name_pref)
@@ -489,8 +541,8 @@ class SysMLUnitsHelper:
     ###########################################
 
     @classmethod
-    def get_python_units(cls, units_attr: Union[syside.AttributeUsage, str], raise_if_unknown_unit=True, cache_unknown=True) \
-            -> Optional[Unit]:
+    def get_python_units(cls, units_attr: Union[syside.AttributeUsage, str], raise_if_unknown_unit=True,
+                         cache_unknown=True) -> Optional[Unit]:
         """Convert a units attribute (SysML) to pint/Python units."""
 
         # Check if dimensionless
@@ -544,7 +596,7 @@ class SysMLUnitsHelper:
 
     def get_sysml_units(self, units: Union[Unit, str] = None, raise_if_unknown_unit=True, cache_unknown=True) \
             -> Optional[syside.AttributeUsage]:
-        """Gets SysML units for the give Python/pint units. Returns None for dimensionless."""
+        """Gets SysML units for the given Python/pint units. Returns None for dimensionless."""
 
         units_str_try = []
 
@@ -593,6 +645,7 @@ class SysMLUnitsHelper:
             units_attr_key = self._sysml_units_map.get(search_str.strip())
 
             if units_attr_key is not None:
+                # Get and return the found units
                 units_attr = self._sysml_obj_map[units_attr_key]
                 assert units_attr != self.dimensionless_units_sysml
 
@@ -696,6 +749,8 @@ class SysMLUnitsHelper:
 
     @staticmethod
     def _sysml_attr_key(sysml_attr: syside.AttributeUsage):
+        """Normalize a SysMl attr to its qualified name,
+        so that we can reuse the SysML-side cache across Syside model instances"""
         if sysml_attr == _UNKNOWN_UNIT or isinstance(sysml_attr, str):
             return sysml_attr
         return str(sysml_attr.qualified_name)
@@ -703,6 +758,7 @@ class SysMLUnitsHelper:
     @classmethod
     def _cache_units_map(cls, pint_units: Union[Unit, _UNKNOWN_UNIT],
                          sysml_attr: Union[syside.AttributeUsage, str, _UNKNOWN_UNIT]):
+        """Add a mapping result to the cache"""
 
         sysml_attr_key = cls._sysml_attr_key(sysml_attr)
 
@@ -715,6 +771,8 @@ class SysMLUnitsHelper:
             cls._sysml_pint_units_map[sysml_attr_key] = pint_units
 
     def _get_sysml_units_map(self):
+        """Get the initial SysML units map from the SysML v2 standard library."""
+
         sysml_alias_map = {}
         sysml_units_map = {}
         sysml_object_map = {}
@@ -760,6 +818,8 @@ class SysMLUnitsHelper:
 
     @classmethod
     def _init_mappings(cls, sysml_units_map, sysml_alias_map):
+        """Initialize mappings for actual use by adding explicit mappings and removing faulty mappings."""
+
         # Check if the caches are already initialized
         if len(cls._pint_sysml_units_map) > 0:
             return
@@ -767,36 +827,11 @@ class SysMLUnitsHelper:
         cls._sysml_alias_map = sysml_alias_map
 
         # Explicitly cache some mappings
-        for pint_str, sysml_str in [
-            ('degC', '°C_abs'),
-            ('delta_degC', '°C'),
-            ('degF', '°F_abs'),
-            ('delta_degF', '°F'),
-            ('kph', 'km/h'),
-            ('mph', 'mph'),
-            ('VA', 'V⋅A'),
-            ('Wh', 'W⋅h'),
-            ('m/s²', 'm/s²'),
-        ]:
+        for pint_str, sysml_str in cls._explicit_units_map:
             cls._cache_units_map(cls.parse_python_units(pint_str), sysml_units_map[sysml_str])
 
         # Remove some units of measure that are represented by duplicate base units
-        for remove_attr_from_map in [
-            'var',  # V*A
-            'octet',  # byte
-            'octet per second',  # byte per second
-            'm²⋅A',  # A*m**2
-            'ua',  # astronomical unit, conflict with microyear in pint
-            'J⋅s⁻¹',  # J/s
-            'm⋅s⁻¹',  # m/s
-            'mol⋅kg⁻¹',  # mol/kg
-            'mol⋅m⁻³',  # mol/m3
-            'ft⋅lbf',
-            'kg⁻¹⋅s⋅A',
-            'lbf⋅in/in',
-            'circular mil',
-            'unit pole',
-        ]:
+        for remove_attr_from_map in cls._units_remove_list:
             units_attr_key = sysml_units_map[remove_attr_from_map]
 
             for alias in sysml_alias_map[units_attr_key]:
@@ -827,12 +862,13 @@ class SysMLUnitsHelper:
     ##################################
 
     def is_typed_by_quantity_value(self, attr: Union[syside.AttributeUsage, syside.AttributeDefinition]):
+        """Check if an attribute is typed by a quantity base value."""
         return attr.specializes(self.quantity_value_base_def)
 
     def get_quantity_value_units(self, quantity_value_attr: Union[syside.AttributeUsage, syside.AttributeDefinition],
                                  raise_if_unknown_unit=True) -> Optional[Unit]:
         """
-        Get the default (pint) units of a QuantityValue or QuantityUnit.
+        Get the preferred (pint) units of a QuantityValue or QuantityUnit.
 
         For example:
         - ISQBase::MassValue --> kg
@@ -918,6 +954,7 @@ class SysMLUnitsHelper:
                         exponent_feature = self._get_feature_by_name(power_factor, 'exponent')
                         exponent = self._simple_parse_value(exponent_feature.feature_value.value)
 
+                        # Parse Pint units and extend the overall units with this power factor
                         pint_units_part = units ** exponent if exponent != 1 else units
                         if pint_units is None:
                             pint_units = pint_units_part
@@ -951,6 +988,9 @@ class SysMLUnitsHelper:
         """
         Maps quantities (e.g. length, mass) from a SystemOfQuantities to default/preferred units (e.g. m, kg)
         in a SystemOfUnits.
+
+        This provides the basis for `get_quantity_value_units`, which either looks up the base quantity types or
+        composite quantity types, which all refer to the base types in the end.
         """
 
         # Get the quantities and units
