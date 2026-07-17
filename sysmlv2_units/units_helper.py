@@ -682,6 +682,10 @@ class SysMLUnitsHelper:
         if not units:
             return
 
+        # Replace pretty-printed SysML-style multiplication with pint-style
+        if isinstance(units, str):
+            units = units.replace('⋅', '·')
+
         # Try to parse the units using pint
         try:
             parsed_units = ureg(units).units

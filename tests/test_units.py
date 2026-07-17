@@ -2,6 +2,7 @@ import math
 import pytest
 import syside
 import pathlib
+from pint import OffsetUnitCalculusError
 from sysmlv2_units import SysMLUnitsHelper, UndefinedUnitError, ureg
 
 
@@ -32,6 +33,12 @@ def units_tests_model():
     return _load_sysml_model(pathlib.Path(__file__).parent / 'units_tests.sysml')
 
 
+_skip_pretty_print_parsing = {
+    'femtometer',
+    'femtometer/s**2',
+}
+
+
 def test_python_units(empty_sysml_model):
     # Create the units helper
     units_helper = SysMLUnitsHelper(empty_sysml_model)
@@ -56,6 +63,23 @@ def test_python_units(empty_sysml_model):
     # Test parsing compound units
     assert units_helper.parse_python_units('m/s') == ureg('m/s').units
     assert units_helper.parse_python_units('m/s**2') == ureg('m/s^2').units
+    assert units_helper.parse_python_units('m⋅s⁻²') == ureg('m/s^2').units
+
+    # Test parsing pretty-printer units
+    for pint_units_ in ureg:
+        for append in ['', '/s**2']:
+            if pint_units_+append in _skip_pretty_print_parsing:
+                continue
+
+            # Check if the pint unit can be converted to SysML units
+            try:
+                pint_units = ureg(pint_units_+append).units
+            except OffsetUnitCalculusError:
+                continue
+
+            pretty_printed = f'{pint_units:~P}'
+            parsed_pint_units = units_helper.parse_python_units(pretty_printed)
+            assert parsed_pint_units == pint_units
 
 
 def test_pint_sysml_printing():
@@ -63,6 +87,22 @@ def test_pint_sysml_printing():
 
     assert f'{ureg('A*m⁻²*K⁻²').units:S}' == 'A⋅K⁻²⋅m⁻²'
     assert f'{ureg('A*K⁻²*m⁻²').units:S}' == 'A⋅K⁻²⋅m⁻²'
+
+    # Test parsing pretty-printer units
+    for pint_units_ in ureg:
+        for append in ['', '/s**2']:
+            if pint_units_+append in _skip_pretty_print_parsing:
+                continue
+
+            # Check if the pint unit can be converted to SysML units
+            try:
+                pint_units = ureg(pint_units_+append).units
+            except OffsetUnitCalculusError:
+                continue
+
+            pretty_printed = f'{pint_units:S}'
+            parsed_pint_units = SysMLUnitsHelper.parse_python_units(pretty_printed)
+            assert parsed_pint_units == pint_units
 
 
 def test_get_sysml_units(empty_sysml_model):
@@ -149,6 +189,7 @@ def test_get_python_units(empty_sysml_model):
 
             assert units_helper.get_python_units(sysml_map['m/s']) == units_helper.parse_python_units('m/s')
             assert units_helper.get_python_units(sysml_map['m⋅s⁻²']) == units_helper.parse_python_units('m/s^2')
+            assert units_helper.get_python_units(sysml_map['m⋅s⁻²']) == units_helper.parse_python_units('m⋅s⁻²')
 
             with pytest.raises(UndefinedUnitError):
                 units_helper.get_python_units(sysml_map['Btu_39°F'])
