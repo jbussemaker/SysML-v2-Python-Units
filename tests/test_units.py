@@ -500,6 +500,12 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('K*kg*s**2/m**3').units, None)
             assert units_helper.get_quantity(attr) == ureg('3.14 K*kg*s**2/m**3')
 
+            attr = elements[46]
+            assert attr.name == 'energyUsage'
+            assert units_helper.is_typed_by_quantity_value(attr)
+            assert units_helper.get_units(attr) == (ureg('kW*h').units, None)
+            assert units_helper.get_quantity(attr) == ureg('1 kWh')
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
@@ -573,3 +579,40 @@ def test_set_quantity(units_tests_model):
                 _assert_get_quantity(do_raise=False)
 
         print(units_helper.to_text(doc.root_node))
+
+
+def test_set_combined_unit(empty_sysml_model):
+    # Create the units helper
+    units_helper = SysMLUnitsHelper(empty_sysml_model)
+
+    # Create a new attribute
+    with empty_sysml_model.documents[0].lock() as doc:
+        root_node = doc.root_node
+
+        _, attr = root_node.children.append(syside.OwningMembership, syside.AttributeUsage)
+        attr.declared_name = 'myAttr'
+
+        for combined_units, expected_scale in [
+            ('kph', 1.),
+            ('kilowatt_hour', 1000.),
+            ('megawatt_hour', 1e6),
+            ('megabyte', 1e6),
+        ]:
+            units = ureg[combined_units].units
+            scale = units_helper.set_units(attr, units)
+            assert scale == expected_scale
+
+            set_units, _ = units_helper.get_units(attr)
+            assert scale*set_units == 1.*units
+
+            quantity = 3.14*units
+            print('')
+            print(quantity)
+            units_helper.set_quantity(attr, quantity)
+            print(units_helper.to_text(attr).strip())
+            set_quantity = units_helper.get_quantity(attr)
+            print(set_quantity)
+
+            # Somehow direct quantity comparison doesn't always work (due to float precision?)
+            set_quantity_ = set_quantity.to(quantity.units)
+            assert set_quantity_.magnitude == pytest.approx(quantity.magnitude, rel=1e-3, abs=1e-3)

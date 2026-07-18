@@ -64,4 +64,6 @@ package AttrUnits {
 
     attribute adhocComplexUnits = K*kg*s**2/m**3;
     attribute adhocComplexQuantity = 3.14 [K*kg*s**2/m**3];
+
+    attribute energyUsage = 1 [kW*h];
 }

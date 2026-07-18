@@ -162,22 +162,26 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
             value = -value
 
         # Set units if needed
-        value_feature = self._set_feature_value_quantity(
+        value_feature, scale = self._set_feature_value_quantity(
             feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         # Set the value
-        self._set_simple_value(value_feature, value)
+        self._set_simple_value(value_feature, value*scale)
 
     def set_units(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage],
-                  raise_if_unknown_unit=True):
-        """Set the feature value to a unit."""
+                  raise_if_unknown_unit=True) -> float:
+        """
+        Set the feature value to a unit.
+
+        Returns the scale of the associated value in case any unit conversion was needed.
+        For example: 1 kW --> W with scale 1000 --> so multiply the value by 1000 --> 1000 W
+        """
 
         # Parse units if needed
         if isinstance(units, str):
             units = self.parse_python_units(units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         # Get the associated SysML units attribute
-        units_attr = None
         if isinstance(units, syside.AttributeUsage):
             units_attr = units
         else:
@@ -193,17 +197,17 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
                 syside.FeatureReferenceExpression)
 
             reference_expression.referent_member.set_member_element(units_attr)
-            return
+            return 1.
 
         # Try to set compound units
         assert isinstance(units, Unit)
-        self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
+        return self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
 
     def _set_feature_value_quantity(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None,
-                                    raise_if_unknown_unit=True) -> syside.Feature:
+                                    raise_if_unknown_unit=True) -> Tuple[syside.Feature, float]:
         """
         Optionally create a new quantity expression if a unit should be set.
-        Returns the feature that should get the actual value (not set yet).
+        Returns the feature that should get the actual value (not set yet) and the scale of the value to be set.
         """
 
         # Parse units if needed
@@ -211,14 +215,14 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
 
             # Check if dimensionless
             if units == self.dimensionless_units_sysml:
-                return feature
+                return feature, 1.
 
         else:
             units = self.parse_python_units(units, raise_if_unknown_unit=raise_if_unknown_unit)
 
             # Check if dimensionless
             if not units:
-                return feature
+                return feature, 1.
 
         # Create a new Quantity expression
         quantity_expression: syside.OperatorExpression
@@ -231,6 +235,6 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         units_feature: syside.Feature
         _, units_feature = quantity_expression.children.append(syside.ParameterMembership, syside.Feature)
 
-        self.set_units(units_feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
+        scale = self.set_units(units_feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
 
-        return value_feature
+        return value_feature, scale

@@ -4,8 +4,9 @@ import logging
 from typing import Tuple, Optional, Union
 from pint import Unit, UndefinedUnitError
 from pint.util import UnitsContainer
+from pint.facets.plain import UnitDefinition, ScaleConverter
 
-from sysmlv2_units.converter import ureg
+from sysmlv2_units.converter import ureg, CustomUndefinedUnitError
 from sysmlv2_units.quantity_mapper import SysMLQuantityValueMapper
 
 __all__ = ['SysMLCompoundUnitsHelper']
@@ -167,8 +168,11 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
     ### Python (pint/str) to SysML conversion functions (SysML setters) ###
     #######################################################################
 
-    def _build_units_expression(self, feature: syside.Feature, units: Unit, raise_if_unknown_unit=True):
-        """Build a compound units expression and set it as the feature value of the provided feature."""
+    def _build_units_expression(self, feature: syside.Feature, units: Unit, raise_if_unknown_unit=True) -> float:
+        """
+        Build a compound units expression and set it as the feature value of the provided feature.
+        Returns the value conversion scale.
+        """
 
         # Get the list of units and their exponents
         units_exponents = list(units._units.unit_items())
@@ -179,7 +183,25 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             unit_str, exponent = units_exponents[0]
 
             # Find the units attribute
-            units_attr = self.get_sysml_units(ureg.Unit(unit_str), raise_if_unknown_unit=raise_if_unknown_unit)
+            units_attr = None
+            try:
+                units_attr = self.get_sysml_units(ureg.Unit(unit_str), raise_if_unknown_unit=True)
+
+            except UndefinedUnitError:
+
+                # Try if we can further parse this unit before converting it to SysML
+                try:
+                    mapped_units, scale = self._get_units_definition(unit_str)
+                    recursive_scale = self._build_units_expression(
+                        feature, mapped_units, raise_if_unknown_unit=raise_if_unknown_unit)
+                    return scale*recursive_scale
+
+                except UndefinedUnitError:
+                    pass
+
+                if raise_if_unknown_unit:
+                    raise
+
             if units_attr is None:
                 units_attr = self.dimensionless_units_sysml
 
@@ -203,7 +225,7 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
                 syside.FeatureReferenceExpression)
 
             reference_expression.referent_member.set_member_element(units_attr)
-            return
+            return 1.
 
         # Separate unit-exponent pairs
         left_side_units = Unit(UnitsContainer({u: e for u, e in units_exponents[:-1]}))
@@ -216,11 +238,37 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
         # Left-side: all units except the last
         _, multi_left_side = mult_expression.children.append(syside.ParameterMembership, syside.Feature)
-        self._build_units_expression(multi_left_side, left_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
+        left_scale = self._build_units_expression(
+            multi_left_side, left_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         # Right-side: the last unit-exponent pair
         _, multi_right_side = mult_expression.children.append(syside.ParameterMembership, syside.Feature)
-        self._build_units_expression(multi_right_side, right_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
+        right_scale = self._build_units_expression(
+            multi_right_side, right_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
+
+        return left_scale * right_scale
+
+    @staticmethod
+    def _get_units_definition(unit_str: str, exponent: int = 1) -> Tuple[Unit, float]:
+        """
+        Get the underlying definition and associated scale of some unit in the unit registry.
+        """
+
+        # Check units definition
+        assert unit_str in ureg._units
+        units_definition = ureg._units[unit_str]
+
+        if isinstance(units_definition, UnitDefinition):
+            converter = units_definition.converter
+
+            if isinstance(converter, ScaleConverter):
+                reference = units_definition.reference
+                mapped_units = ureg(f'{reference}**{exponent}').units
+
+                scale = converter.scale
+                return mapped_units, scale
+
+        raise CustomUndefinedUnitError(unit_str, msg=f'Could not get units definition: {unit_str}')
 
     @staticmethod
     def _set_minus_operator(feature: syside.Feature) -> syside.Feature:
