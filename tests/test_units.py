@@ -506,6 +506,12 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('kW*h').units, None)
             assert units_helper.get_quantity(attr) == ureg('1 kWh')
 
+            attr = elements[47]
+            assert attr.name == 'energyPrefix'
+            assert units_helper.is_typed_by_quantity_value(attr)
+            assert units_helper.get_units(attr) == (ureg('kW*h').units, None)
+            assert units_helper.get_quantity(attr) == ureg('1 kWh')
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
@@ -594,9 +600,10 @@ def test_set_combined_unit(empty_sysml_model):
 
         for combined_units, expected_scale in [
             ('kph', 1.),
-            ('kilowatt_hour', 1000.),
-            ('megawatt_hour', 1e6),
-            ('megabyte', 1e6),
+            ('kilowatt_hour', 1.),
+            ('megawatt_hour', 1.),
+            ('nanowatt_hour', 1.),
+            ('megabyte', 1.),
         ]:
             units = ureg[combined_units].units
             scale = units_helper.set_units(attr, units)

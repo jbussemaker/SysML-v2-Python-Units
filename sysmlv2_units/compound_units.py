@@ -1,17 +1,21 @@
 import math
 import syside
 import logging
-from typing import Tuple, Optional, Union
+from typing import Tuple, Optional, Union, List
 from pint import Unit, UndefinedUnitError
 from pint.util import UnitsContainer
-from pint.facets.plain import UnitDefinition, ScaleConverter
+from pint.facets.plain import UnitDefinition, ScaleConverter, PrefixDefinition
 
+from sysmlv2_units.helper import SysMLHelper
 from sysmlv2_units.converter import ureg, CustomUndefinedUnitError
 from sysmlv2_units.quantity_mapper import SysMLQuantityValueMapper
 
 __all__ = ['SysMLCompoundUnitsHelper']
 
 log = logging.getLogger('sysml.units')
+
+def _is_p10(v):
+    return math.log10(v) == int(math.log10(v))
 
 
 class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
@@ -26,13 +30,30 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
         syside.Operator.ExponentCaret: '^',
     }
 
+    # Get sorted power-10 unit prefixes
+    _prefixes: List[PrefixDefinition] = sorted({u_pref for u_pref in ureg._prefixes.values()
+                                                if u_pref.name and _is_p10(u_pref.value)}, key=lambda p: p.value)
+
+    def __init__(self, model: syside.Model):
+        super().__init__(model)
+        doc_namespace_map = self._doc_namespace_map
+
+        self.unit_prefix_def = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+            'MeasurementReferences::UnitPrefix', syside.AttributeDefinition, env=True)
+
+        self._sysml_prefix_map = sysml_prefix_map = {}
+        prefixes_package = SysMLHelper.search_namespace(model, doc_namespace_map, 'SIPrefixes', env=True)
+        for attr in prefixes_package.children.elements:
+            if isinstance(attr, syside.AttributeUsage) and attr.specializes(self.unit_prefix_def):
+                sysml_prefix_map[attr.name] = attr
+
     ###################################################################
     ### SysML to Python (pint) conversion functions (SysML getters) ###
     ###################################################################
 
     def _parse_units_feature(self, units_feature: Union[syside.Feature, syside.Expression],
                              raise_if_unknown_unit=True) \
-            -> Tuple[Union[Optional[Unit], int], Optional[syside.AttributeUsage]]:
+            -> Tuple[Union[Optional[Unit], int, PrefixDefinition], Optional[syside.AttributeUsage]]:
         """
         Parses a feature that defines the units.
         Additionally, returns the units attribute that was set to define the unit if applicable.
@@ -51,6 +72,13 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             units_attr = units_expression.referent
             if not isinstance(units_attr, syside.AttributeUsage):
                 return None, None
+
+            # Check if it is a prefix
+            if self.is_unit_prefix(units_attr):
+                if units_attr.name not in ureg._prefixes:
+                    raise CustomUndefinedUnitError(units_attr.name, msg=f'Could not parse unit prefix: {units_attr.name}')
+                prefix_def = ureg._prefixes[units_attr.name]
+                return prefix_def, units_attr
 
             # Parse the units attr to Pint units
             units, _ = self._parse_units_attr(units_attr, raise_if_unknown_unit=raise_if_unknown_unit)
@@ -77,6 +105,29 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
                 left_side_feature, raise_if_unknown_unit=raise_if_unknown_unit)
             right_side_units, _ = self._parse_units_feature(
                 right_side_feature, raise_if_unknown_unit=raise_if_unknown_unit)
+
+            # Resolve unit prefixes
+            if isinstance(right_side_units, PrefixDefinition):
+                if isinstance(left_side_units, PrefixDefinition):
+                    raise CustomUndefinedUnitError('', msg=f'Chained prefix definitions not supported: '
+                                                           f'{left_side_units.name}*{right_side_units.name}')
+                left_side_units, right_side_units = right_side_units, left_side_units
+
+            if isinstance(left_side_units, PrefixDefinition):
+                prefix = left_side_units.name
+
+                if right_side_units is None or not isinstance(right_side_units, Unit):
+                    raise CustomUndefinedUnitError(
+                        prefix, msg=f'Standalone prefix not supported: '
+                                    f'{left_side_units.name} (right side = {right_side_units})')
+                if operator_str != '*':
+                    raise CustomUndefinedUnitError(operator_str, msg=f'Unsupported operator between prefix and units: '
+                                                                     f'{prefix} {operator_str} {right_side_units}')
+
+                # Parse units with a prefix
+                units_str = f'{prefix}{right_side_units}'
+                units = self.parse_python_units(units_str, raise_if_unknown_unit=raise_if_unknown_unit)
+                return units, None
 
             # Check for unknown or dimensionless units
             if right_side_units is None:
@@ -164,6 +215,10 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
         raise ValueError(f'Could not parse simple expression: {expression}')
 
+    def is_unit_prefix(self, units_attr: syside.AttributeUsage) -> bool:
+        """Return whether the unit attribute (SysML) is a UnitPrefix type."""
+        return units_attr.specializes(self.unit_prefix_def)
+
     #######################################################################
     ### Python (pint/str) to SysML conversion functions (SysML setters) ###
     #######################################################################
@@ -247,6 +302,48 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             multi_right_side, right_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         return left_scale * right_scale
+
+    def _reduce_compound_scale(self, feature: syside.Feature, scale: float):
+        """Reduce scaling factor of compound units by inserting a unit prefix."""
+
+        # Find the prefix to insert to reduce the scale to as close to 1.0 as possible
+        if scale >= 9.99:
+            prefixes = [pd for pd in self._prefixes if scale/pd.value >= .99]
+            prefix_def = prefixes[-1]
+
+        elif scale <= .1001:
+            prefixes = [pd for pd in self._prefixes if scale/pd.value <= 1.001]
+            prefix_def = prefixes[0]
+
+        else:
+            return scale
+
+        prefix = prefix_def.name
+        scale /= prefix_def.value
+
+        # Get the units prefix SysML element
+        if prefix not in self._sysml_prefix_map:
+            return scale
+        prefix_attr = self._sysml_prefix_map[prefix]
+
+        # Extract the units expression
+        units_expression = feature.feature_value_member.extract_member_element()
+
+        # Create a new multiplication expression
+        expression: syside.OperatorExpression
+        _, expression = feature.feature_value_member.set_member_element(syside.OperatorExpression)
+        expression.operator = syside.ExplicitOperator.Multiply
+
+        # Left-side: prefix
+        _, left_side = expression.children.append(syside.ParameterMembership, syside.Feature)
+        _, ref_expr = left_side.feature_value_member.set_member_element(syside.FeatureReferenceExpression)
+        ref_expr.referent_member.set_member_element(prefix_attr)
+
+        # Right-side: units expression
+        _, right_side = expression.children.append(syside.ParameterMembership, syside.Feature)
+        right_side.feature_value_member.set_member_element(units_expression)
+
+        return scale
 
     @staticmethod
     def _get_units_definition(unit_str: str, exponent: int = 1) -> Tuple[Unit, float]:

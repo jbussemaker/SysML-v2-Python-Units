@@ -1,9 +1,7 @@
-import math
 import syside
 import logging
 from typing import Tuple, Optional, Union
 from pint import Unit, Quantity, UndefinedUnitError
-from pint.util import UnitsContainer
 
 from sysmlv2_units.converter import ureg
 from sysmlv2_units.compound_units import SysMLCompoundUnitsHelper
@@ -201,7 +199,9 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
 
         # Try to set compound units
         assert isinstance(units, Unit)
-        return self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
+        scale = self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
+        scale = self._reduce_compound_scale(feature, scale)
+        return scale
 
     def _set_feature_value_quantity(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None,
                                     raise_if_unknown_unit=True) -> Tuple[syside.Feature, float]:

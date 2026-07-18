@@ -11,6 +11,7 @@ Convert units and quantities between standard [SysML v2](https://www.omg.org/sys
 - Get/set unit as `attribute` value, specified using Pint `Unit` objects
 - Supports numerical values, as well as `inf` (`*` in SysML v2) and `NaN` (set as `null` in SysML v2)
 - Supports compound units, for example `K·kg·s²/m³`
+- Supports unit prefixes (kilo, mega, milli, etc.)
 - Conversion functions between SysML v2 units and Pint `Unit`, and string parsing functions
 - Derive preferred units for a quantity type, for example `kg` for an `ISQ::mass` quantity
 - Syside Automator [`ReferencePrinter`](https://docs.sensmetry.com/python/latest/syside/ReferencePrinter.html) for
