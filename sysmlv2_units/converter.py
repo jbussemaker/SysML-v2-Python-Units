@@ -6,12 +6,22 @@ from pint import Unit, Quantity, get_application_registry, UndefinedUnitError, r
 
 from sysmlv2_units.helper import SysMLHelper
 
-__all__ = ['SysMLUnitsConverter', 'ureg', '_UNKNOWN_UNIT']
+__all__ = ['SysMLUnitsConverter', 'ureg', '_UNKNOWN_UNIT', 'CustomUndefinedUnitError']
 
 log = logging.getLogger('sysml.units')
 
 ureg = get_application_registry()
 _UNKNOWN_UNIT = object()
+
+
+class CustomUndefinedUnitError(UndefinedUnitError):
+
+    def __init__(self, unit_names, msg: str):
+        super().__init__(unit_names)
+        self.msg = msg
+
+    def __str__(self):
+        return self.msg
 
 
 class SysMLUnitsConverter:
@@ -136,14 +146,15 @@ class SysMLUnitsConverter:
             return pint_units
 
         # No units were found
+        msg = f'Could not convert SysML units "{units_attr_str}" to pint units'
         if cls.do_log:
-            log.debug(f'Could not convert SysML units "{units_attr_str}" to pint units')
+            log.debug(msg)
         if cache_unknown:
             cls._cache_units_map(_UNKNOWN_UNIT, units_attr)
 
         # Raise an error if needed
         if raise_if_unknown_unit:
-            raise UndefinedUnitError(units_attr_str)
+            raise CustomUndefinedUnitError(units_attr_str, msg=msg)
 
     def get_sysml_units(self, units: Union[Unit, str] = None, raise_if_unknown_unit=True, cache_unknown=True) \
             -> Optional[syside.AttributeUsage]:
@@ -207,14 +218,15 @@ class SysMLUnitsConverter:
                 return units_attr
 
         # Remember that the search was unsuccessful
+        msg = f'Could not convert pint units "<{units:~P}> {units:P}" to SysML units'
         if self.__class__.do_log:
-            log.debug(f'Could not convert pint units "<{units:~P}> {units:P}" to SysML units')
+            log.debug(msg)
         if cache_unknown:
             self._cache_units_map(units, _UNKNOWN_UNIT)
 
         # Raise an error if needed
         if raise_if_unknown_unit:
-            raise UndefinedUnitError(str(units))
+            raise CustomUndefinedUnitError(str(units), msg=msg)
 
     @classmethod
     def parse_python_units(cls, units: Union[Unit, str] = None, raise_if_unknown_unit=True) -> Optional[Unit]:
@@ -251,9 +263,9 @@ class SysMLUnitsConverter:
             if raise_if_unknown_unit:
                 raise
 
-        except Exception:
+        except Exception as e:
             if raise_if_unknown_unit:
-                raise UndefinedUnitError(units)
+                raise CustomUndefinedUnitError(units, msg=str(e))
 
         if cls.do_log:
             log.debug(f'Could not parse "{units}" to pint units')
@@ -279,7 +291,7 @@ class SysMLUnitsConverter:
         # If the SysML units were unknown, raise if requested or return None
         if units_attr_key == _UNKNOWN_UNIT:
             if raise_if_unknown_unit:
-                raise UndefinedUnitError(str(pint_units))
+                raise CustomUndefinedUnitError(str(pint_units), msg=f'Cannot map Pint units to SysML: {pint_units}')
             return
 
         return units_attr_key
@@ -297,7 +309,7 @@ class SysMLUnitsConverter:
         # If the pint units were unknown, raise if requested or return None
         if pint_units == _UNKNOWN_UNIT:
             if raise_if_unknown_unit:
-                raise UndefinedUnitError(units_attr.name)
+                raise CustomUndefinedUnitError(units_attr.name, msg=f'Cannot map SysML to Pint units: {units_attr_key}')
             return
 
         return pint_units

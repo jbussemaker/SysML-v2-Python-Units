@@ -3,6 +3,7 @@ import syside
 import logging
 from typing import Tuple, Optional, Union
 from pint import Unit, Quantity, UndefinedUnitError
+from pint.util import UnitsContainer
 
 from sysmlv2_units.converter import ureg
 from sysmlv2_units.quantity_mapper import SysMLQuantityValueMapper
@@ -295,7 +296,7 @@ class SysMLUnitsHelper(SysMLQuantityValueMapper):
             value = -value
 
         # Set units if needed
-        value_feature = self._set_feature_value_units(
+        value_feature = self._set_feature_value_quantity(
             feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         # Set the value
@@ -310,20 +311,85 @@ class SysMLUnitsHelper(SysMLQuantityValueMapper):
             units = self.parse_python_units(units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         # Get the associated SysML units attribute
+        units_attr = None
         if isinstance(units, syside.AttributeUsage):
             units_attr = units
         else:
-            units_attr = self.get_sysml_units(units, raise_if_unknown_unit=raise_if_unknown_unit)
+            # If the units are unknown, compound or dimensionless, we instead use the units expression building code to
+            # raise the actual error, because the `get_sysml_units` function does not distinguish between unknown and
+            # compound units
+            units_attr = self.get_sysml_units(units, raise_if_unknown_unit=False)
 
-        # Create and set the reference expression
-        reference_expression: syside.FeatureReferenceExpression
-        _, reference_expression = feature.feature_value_member.set_member_element(
-            syside.FeatureReferenceExpression)
+        if units_attr is not None:
+            # Create and set the reference expression
+            reference_expression: syside.FeatureReferenceExpression
+            _, reference_expression = feature.feature_value_member.set_member_element(
+                syside.FeatureReferenceExpression)
 
-        reference_expression.referent_member.set_member_element(units_attr)
+            reference_expression.referent_member.set_member_element(units_attr)
+            return
 
-    def _set_feature_value_units(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None,
-                                raise_if_unknown_unit=True) -> syside.Feature:
+        # Try to set compound units
+        assert isinstance(units, Unit)
+        self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
+
+    def _build_units_expression(self, feature: syside.Feature, units: Unit, raise_if_unknown_unit=True):
+        """Build a compound units expression and set it as the feature value of the provided feature."""
+
+        # Get the list of units and their exponents
+        units_exponents = list(units._units.unit_items())
+        assert len(units_exponents) > 0
+
+        # If there is only one unit-exponent pair, build the exponent expression
+        if len(units_exponents) == 1:
+            unit_str, exponent = units_exponents[0]
+
+            # Find the units attribute
+            units_attr = self.get_sysml_units(ureg.Unit(unit_str), raise_if_unknown_unit=raise_if_unknown_unit)
+            if units_attr is None:
+                units_attr = self.dimensionless_units_sysml
+
+            # Check if we need to build an exponentiation
+            unit_ref_feature = feature
+            if exponent != 1:
+                exponent_expression: syside.OperatorExpression
+                _, exponent_expression = feature.feature_value_member.set_member_element(syside.OperatorExpression)
+                exponent_expression.operator = syside.ExplicitOperator.ExponentCaret
+
+                # Left-side: unit attribute reference
+                _, unit_ref_feature = exponent_expression.children.append(syside.ParameterMembership, syside.Feature)
+
+                # Right-side: exponent
+                _, exponent_feature = exponent_expression.children.append(syside.ParameterMembership, syside.Feature)
+                self._set_simple_value(exponent_feature, exponent)
+
+            # Set the unit reference
+            reference_expression: syside.FeatureReferenceExpression
+            _, reference_expression = unit_ref_feature.feature_value_member.set_member_element(
+                syside.FeatureReferenceExpression)
+
+            reference_expression.referent_member.set_member_element(units_attr)
+            return
+
+        # Separate unit-exponent pairs
+        left_side_units = Unit(UnitsContainer({u: e for u, e in units_exponents[:-1]}))
+        right_side_units = Unit(UnitsContainer({units_exponents[-1][0]: units_exponents[-1][1]}))
+
+        # Create the top-level multiplication operator expression
+        mult_expression: syside.OperatorExpression
+        _, mult_expression = feature.feature_value_member.set_member_element(syside.OperatorExpression)
+        mult_expression.operator = syside.ExplicitOperator.Multiply
+
+        # Left-side: all units except the last
+        _, multi_left_side = mult_expression.children.append(syside.ParameterMembership, syside.Feature)
+        self._build_units_expression(multi_left_side, left_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
+
+        # Right-side: the last unit-exponent pair
+        _, multi_right_side = mult_expression.children.append(syside.ParameterMembership, syside.Feature)
+        self._build_units_expression(multi_right_side, right_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
+
+    def _set_feature_value_quantity(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None,
+                                    raise_if_unknown_unit=True) -> syside.Feature:
         """
         Optionally create a new quantity expression if a unit should be set.
         Returns the feature that should get the actual value (not set yet).

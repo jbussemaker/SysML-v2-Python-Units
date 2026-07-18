@@ -487,6 +487,19 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg.g, units_helper.get_sysml_units('g'))
             assert units_helper.get_quantity(attr) == ureg('100 g')
 
+            attr = elements[44]
+            assert attr.name == 'adhocComplexUnits'
+            assert not units_helper.is_typed_by_quantity_value(attr)
+            assert units_helper.get_units(attr) == (ureg('K*kg*s**2/m**3').units, None)
+            with pytest.raises(ValueError):
+                assert units_helper.get_quantity(attr)
+
+            attr = elements[45]
+            assert attr.name == 'adhocComplexQuantity'
+            assert units_helper.is_typed_by_quantity_value(attr)
+            assert units_helper.get_units(attr) == (ureg('K*kg*s**2/m**3').units, None)
+            assert units_helper.get_quantity(attr) == ureg('3.14 K*kg*s**2/m**3')
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
@@ -542,7 +555,15 @@ def test_set_quantity(units_tests_model):
             _assert_get_quantity()
 
             # Set by value and SysML units attribute
-            canon_units_attr = units_helper.get_sysml_units(quantity.units)
+            try:
+                canon_units_attr = units_helper.get_sysml_units(quantity.units)
+
+            except UndefinedUnitError:
+                # If it is not a compound unit, indeed this should be an error
+                if len(list(quantity.units._units.unit_items())) == 1:
+                    raise
+                canon_units_attr = quantity.units
+
             units_helper.set_value_and_units(attr, quantity.magnitude, canon_units_attr)
             _assert_get_quantity()
 

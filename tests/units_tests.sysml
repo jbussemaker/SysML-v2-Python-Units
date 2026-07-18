@@ -61,4 +61,7 @@ package AttrUnits {
     attribute soundValue :> ISQ::soundPressureLevel;
 
     attribute assignedMassValue :> ISQ::mass = 100[SI::gram];
+
+    attribute adhocComplexUnits = K*kg*s**2/m**3;
+    attribute adhocComplexQuantity = 3.14 [K*kg*s**2/m**3];
 }
