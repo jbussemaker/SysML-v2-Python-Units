@@ -51,6 +51,8 @@ def test_python_units(empty_sysml_model):
     assert units_helper.parse_python_units('m') == ureg.m
     assert units_helper.parse_python_units('') is None
 
+    assert units_helper.parse_python_units('%') == ureg('%').units
+
     # Test parsing an unknown units
     with pytest.raises(UndefinedUnitError):
         units_helper.parse_python_units('blabla')
@@ -512,6 +514,12 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('kW*h').units, None)
             assert units_helper.get_quantity(attr) == ureg('1 kWh')
 
+            attr = elements[48]
+            assert attr.name == 'percentage'
+            assert units_helper.is_typed_by_quantity_value(attr)
+            assert units_helper.get_units(attr) == (ureg('%').units, None)
+            assert units_helper.get_quantity(attr) == ureg('3.14 %')
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
@@ -567,12 +575,13 @@ def test_set_quantity(units_tests_model):
             _assert_get_quantity()
 
             # Set by value and SysML units attribute
+            is_percentage = quantity.units == ureg['%']
             try:
                 canon_units_attr = units_helper.get_sysml_units(quantity.units)
 
             except UndefinedUnitError:
-                # If it is not a compound unit, indeed this should be an error
-                if len(list(quantity.units._units.unit_items())) == 1:
+                # If it is not a compound unit or "percentage", indeed this should be an error
+                if len(list(quantity.units._units.unit_items())) == 1 and not is_percentage:
                     raise
                 canon_units_attr = quantity.units
 

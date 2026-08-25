@@ -67,4 +67,6 @@ package AttrUnits {
 
     attribute energyUsage = 1 [kW*h];
     attribute energyPrefix = 1 [kilo*W*h];
+
+    attribute percentage = 3.14 [centi*MeasurementReferences::one];
 }

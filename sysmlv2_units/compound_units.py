@@ -115,17 +115,25 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
             if isinstance(left_side_units, PrefixDefinition):
                 prefix = left_side_units.name
+                units_str = f'{prefix}{right_side_units}'
 
+                # Check if we are dealing with a standalone prefix
                 if right_side_units is None or not isinstance(right_side_units, Unit):
-                    raise CustomUndefinedUnitError(
-                        prefix, msg=f'Standalone prefix not supported: '
-                                    f'{left_side_units.name} (right side = {right_side_units})')
+
+                    # Interpret centi (or centi*one) as meaning percent (%)
+                    if left_side_units.name == 'centi':
+                        units_str = '%'
+
+                    else:
+                        raise CustomUndefinedUnitError(
+                            prefix, msg=f'Standalone prefix not supported: '
+                                        f'{left_side_units.name} (right side = {right_side_units})')
+
                 if operator_str != '*':
                     raise CustomUndefinedUnitError(operator_str, msg=f'Unsupported operator between prefix and units: '
                                                                      f'{prefix} {operator_str} {right_side_units}')
 
                 # Parse units with a prefix
-                units_str = f'{prefix}{right_side_units}'
                 units = self.parse_python_units(units_str, raise_if_unknown_unit=raise_if_unknown_unit)
                 return units, None
 
@@ -230,8 +238,11 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
         """
 
         # Get the list of units and their exponents
-        units_exponents = list(units._units.unit_items())
-        assert len(units_exponents) > 0
+        if units == self.dimensionless_units_pint:
+            units_exponents = [(None, 1)]
+        else:
+            units_exponents = list(units._units.unit_items())
+            assert len(units_exponents) > 0
 
         # If there is only one unit-exponent pair, build the exponent expression
         if len(units_exponents) == 1:
@@ -239,23 +250,24 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
             # Find the units attribute
             units_attr = None
-            try:
-                units_attr = self.get_sysml_units(ureg.Unit(unit_str), raise_if_unknown_unit=True)
-
-            except UndefinedUnitError:
-
-                # Try if we can further parse this unit before converting it to SysML
+            if unit_str:
                 try:
-                    mapped_units, scale = self._get_units_definition(unit_str)
-                    recursive_scale = self._build_units_expression(
-                        feature, mapped_units, raise_if_unknown_unit=raise_if_unknown_unit)
-                    return scale*recursive_scale
+                    units_attr = self.get_sysml_units(ureg.Unit(unit_str), raise_if_unknown_unit=True)
 
                 except UndefinedUnitError:
-                    pass
 
-                if raise_if_unknown_unit:
-                    raise
+                    # Try if we can further parse this unit before converting it to SysML
+                    try:
+                        mapped_units, scale = self._get_units_definition(unit_str)
+                        recursive_scale = self._build_units_expression(
+                            feature, mapped_units, raise_if_unknown_unit=raise_if_unknown_unit)
+                        return scale*recursive_scale
+
+                    except UndefinedUnitError:
+                        pass
+
+                    if raise_if_unknown_unit:
+                        raise
 
             if units_attr is None:
                 units_attr = self.dimensionless_units_sysml
