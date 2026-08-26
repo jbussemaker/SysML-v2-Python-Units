@@ -147,7 +147,7 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             # Parse Pint units
             left_str = f'{left_side_units:~C}' if isinstance(left_side_units, Unit) else str(left_side_units)
             right_str = f'{right_side_units:~C}' if isinstance(right_side_units, Unit) else str(right_side_units)
-            units = self.parse_python_units(' '.join([left_str, operator_str, right_str]))
+            units = self.parse_python_units(f'({left_str}) {operator_str} ({right_str})')
             return units, None
 
         return None, None
@@ -248,6 +248,11 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
         if len(units_exponents) == 1:
             unit_str, exponent = units_exponents[0]
 
+            # Check if we need to build an exponentiation
+            units_set_feature = feature
+            if exponent != 1:
+                units_set_feature = self._create_exponent_expression(feature, exponent)
+
             # Find the units attribute
             units_attr = None
             if unit_str:
@@ -258,10 +263,18 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
                     # Try if we can further parse this unit before converting it to SysML
                     try:
+                        # Get the unit that we do know
                         mapped_units, scale = self._get_units_definition(unit_str)
+
+                        # Build the expression for it, potentially resulting in a scaling factor
                         recursive_scale = self._build_units_expression(
-                            feature, mapped_units, raise_if_unknown_unit=raise_if_unknown_unit)
-                        return scale*recursive_scale
+                            units_set_feature, mapped_units, raise_if_unknown_unit=raise_if_unknown_unit)
+
+                        # Reduce the scaling factor by adding a prefix (kilo, mega, centi, etc.)
+                        scale *= recursive_scale
+                        scale = self._reduce_compound_scale(units_set_feature, scale)
+
+                        return scale
 
                     except UndefinedUnitError:
                         pass
@@ -272,23 +285,9 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             if units_attr is None:
                 units_attr = self.dimensionless_units_sysml
 
-            # Check if we need to build an exponentiation
-            unit_ref_feature = feature
-            if exponent != 1:
-                exponent_expression: syside.OperatorExpression
-                _, exponent_expression = feature.feature_value_member.set_member_element(syside.OperatorExpression)
-                exponent_expression.operator = syside.ExplicitOperator.ExponentCaret
-
-                # Left-side: unit attribute reference
-                _, unit_ref_feature = exponent_expression.children.append(syside.ParameterMembership, syside.Feature)
-
-                # Right-side: exponent
-                _, exponent_feature = exponent_expression.children.append(syside.ParameterMembership, syside.Feature)
-                self._set_simple_value(exponent_feature, exponent)
-
             # Set the unit reference
             reference_expression: syside.FeatureReferenceExpression
-            _, reference_expression = unit_ref_feature.feature_value_member.set_member_element(
+            _, reference_expression = units_set_feature.feature_value_member.set_member_element(
                 syside.FeatureReferenceExpression)
 
             reference_expression.referent_member.set_member_element(units_attr)
@@ -314,6 +313,23 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             multi_right_side, right_side_units, raise_if_unknown_unit=raise_if_unknown_unit)
 
         return left_scale * right_scale
+
+    def _create_exponent_expression(self, feature: syside.Feature, exponent: int):
+        if exponent == 1:
+            return feature
+
+        exponent_expression: syside.OperatorExpression
+        _, exponent_expression = feature.feature_value_member.set_member_element(syside.OperatorExpression)
+        exponent_expression.operator = syside.ExplicitOperator.ExponentCaret
+
+        # Left-side: unit attribute reference
+        _, unit_ref_feature = exponent_expression.children.append(syside.ParameterMembership, syside.Feature)
+
+        # Right-side: exponent
+        _, exponent_feature = exponent_expression.children.append(syside.ParameterMembership, syside.Feature)
+        self._set_simple_value(exponent_feature, exponent)
+
+        return unit_ref_feature
 
     def _reduce_compound_scale(self, feature: syside.Feature, scale: float):
         """Reduce scaling factor of compound units by inserting a unit prefix."""

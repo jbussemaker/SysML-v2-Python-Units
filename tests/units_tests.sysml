@@ -69,4 +69,6 @@ package AttrUnits {
     attribute energyPrefix = 1 [kilo*W*h];
 
     attribute percentage = 3.14 [centi*MeasurementReferences::one];
+
+    attribute tsfc = 5 [SI::g / (SIPrefixes::kilo * SI::N * SI::s)]; // https://en.wikipedia.org/wiki/Thrust-specific_fuel_consumption
 }

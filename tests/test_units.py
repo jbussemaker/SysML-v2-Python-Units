@@ -520,6 +520,12 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('%').units, None)
             assert units_helper.get_quantity(attr) == ureg('3.14 %')
 
+            attr = elements[49]
+            assert attr.name == 'tsfc'
+            assert units_helper.is_typed_by_quantity_value(attr)
+            assert units_helper.get_units(attr) == (ureg('g/(kN*s)').units, None)
+            assert units_helper.get_quantity(attr) == ureg('5 g/(kN*s)')
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)

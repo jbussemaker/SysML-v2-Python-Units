@@ -200,7 +200,6 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         # Try to set compound units
         assert isinstance(units, Unit)
         scale = self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
-        scale = self._reduce_compound_scale(feature, scale)
         return scale
 
     def _set_feature_value_quantity(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None,
