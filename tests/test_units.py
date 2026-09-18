@@ -4,6 +4,7 @@ import syside
 import pathlib
 from pint import OffsetUnitCalculusError
 from sysmlv2_units import SysMLUnitsHelper, UndefinedUnitError, ureg
+from sysmlv2_units.converter import CustomUndefinedUnitError
 
 
 def _load_sysml_model(path):
@@ -46,12 +47,18 @@ def test_python_units(empty_sysml_model):
     # Test parsing into pint Unit objects
     assert units_helper.parse_python_units() is None
     assert units_helper.parse_python_units(units_helper.dimensionless_units_pint) is None
+    assert units_helper.parse_python_units(units_helper.dimensionless_units_str) is None
     assert units_helper.parse_python_units(ureg.m) == ureg.m
 
     assert units_helper.parse_python_units('m') == ureg.m
     assert units_helper.parse_python_units('') is None
 
     assert units_helper.parse_python_units('%') == ureg('%').units
+
+    assert units_helper.units_to_str(units_helper.dimensionless_units_pint) == ''
+    assert units_helper.units_to_str(units_helper.dimensionless_units_str) == ''
+    assert units_helper.units_to_str('') == ''
+    assert units_helper.units_to_str(None) == ''
 
     # Test parsing an unknown units
     with pytest.raises(UndefinedUnitError):
@@ -82,6 +89,13 @@ def test_python_units(empty_sysml_model):
             pretty_printed = f'{pint_units:~P}'
             parsed_pint_units = units_helper.parse_python_units(pretty_printed)
             assert parsed_pint_units == pint_units
+
+            assert units_helper.units_to_str(pretty_printed) == pretty_printed
+            assert units_helper.units_to_str(pint_units) == pretty_printed
+
+            pp_sysml = f'{pint_units:S}'
+            assert units_helper.units_to_str(pp_sysml, sysml_style=True) == pp_sysml
+            assert units_helper.units_to_str(pint_units, sysml_style=True) == pp_sysml
 
 
 def test_pint_sysml_printing():
@@ -152,7 +166,15 @@ def test_get_sysml_units(empty_sysml_model):
                 pint_units = ureg[pint_units_].units
                 units_attr = units_helper.get_sysml_units(pint_units, raise_if_unknown_unit=False)
                 if units_attr is None:
-                    unknowns.append(f'<{pint_units:~P}> {pint_units:P}')
+
+                    # Try if the unit can be mapped to a known compound unit
+                    try:
+                        mapped_units, scale = units_helper._get_units_definition(pint_units_)
+                        mapping_str = f' --> "{mapped_units:~P}" / {scale}'
+                    except UndefinedUnitError:
+                        mapping_str = f' (COULD NOT MAP)'
+
+                    unknowns.append(f'<{pint_units:~P}> {pint_units:P}{mapping_str}')
                     continue
 
                 # Check if the SysML unit will be converted back to the same pint unit
@@ -160,6 +182,12 @@ def test_get_sysml_units(empty_sysml_model):
                 if 1*converted_pint_units != 1*pint_units:
                     raise RuntimeError(f'Reverse conversion error: {units_attr.name} != {pint_units} '
                                        f'(== {converted_pint_units})')
+
+                pretty_printed = units_helper.units_to_str(converted_pint_units)
+                assert units_helper.units_to_str(units_attr) == pretty_printed
+
+                pp_sysml = units_helper.units_to_str(converted_pint_units, sysml_style=True)
+                assert units_helper.units_to_str(units_attr, sysml_style=True) == pp_sysml
 
     print('PINT->SYSML UNKNOWNS:\n'+'\n'.join(unknowns))
 
@@ -213,12 +241,22 @@ def test_get_python_units(empty_sysml_model):
                 pint_units = units_helper.get_python_units(units_attr, raise_if_unknown_unit=False)
                 if pint_units is None:
                     unknowns.append(f'<{units_attr.short_name or ""}> {units_attr.name}')
+
+                    pretty_printed = units_helper.units_to_str(units_attr)
+                    assert pretty_printed == (units_attr.short_name if units_attr.short_name else units_attr.name)
+
                     continue
 
                 converted_units_attr = units_helper.get_sysml_units(pint_units, raise_if_unknown_unit=False)
                 if converted_units_attr != units_attr:
                     raise RuntimeError(f'Reverse conversion error: {pint_units} != {units_attr.name} '
                                        f'(== {converted_units_attr.name})')
+
+                pretty_printed = units_helper.units_to_str(pint_units)
+                assert units_helper.units_to_str(units_attr) == pretty_printed
+
+                pp_sysml = units_helper.units_to_str(pint_units, sysml_style=True)
+                assert units_helper.units_to_str(units_attr, sysml_style=True) == pp_sysml
 
     print('SYSML->PINT UNKNOWNS:\n'+'\n'.join(unknowns))
 
@@ -526,9 +564,32 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('g/(kN*s)').units, None)
             assert units_helper.get_quantity(attr) == ureg('5 g/(kN*s)')
 
+            attr = elements[50]
+            assert attr.name == 'strUnits'
+            assert units_helper.get_units(attr) == (ureg('pixel').units, None)
+            with pytest.raises(ValueError):
+                assert units_helper.get_quantity(attr)
+
+            attr = elements[51]
+            assert attr.name == 'docUnits'
+            assert units_helper.get_units(attr) == (ureg('pixel').units, None)
+            with pytest.raises(ValueError):
+                assert units_helper.get_quantity(attr)
+
+            attr = elements[52]
+            assert attr.name == 'strQuantity'
+            assert units_helper.get_units(attr) == (ureg('pixel').units, None)
+            assert units_helper.get_quantity(attr) == ureg('3.14 pixel')
+
+            attr = elements[53]
+            assert attr.name == 'docQuantity'
+            assert units_helper.get_units(attr) == (ureg('pixel').units, None)
+            assert units_helper.get_quantity(attr) == ureg('96 pixel')
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
+    graceful_units_helper = SysMLUnitsHelper(units_tests_model, graceful_if_sysml_unsupported=True)
 
     def _assert_get_quantity(do_raise=True):
         quantity_ = units_helper.get_quantity(attr, raise_if_unknown_unit=do_raise)
@@ -543,8 +604,10 @@ def test_set_quantity(units_tests_model):
         assert isinstance(package, syside.Package)
         elements = package.children.elements
 
+        unsupported_units = set()
         for attr in elements[3:]:
             print(attr.name)
+            is_unsupported_in_sysml = False
             try:
                 quantity = units_helper.get_quantity(attr)
 
@@ -562,7 +625,14 @@ def test_set_quantity(units_tests_model):
                 units, units_attr = units_helper.get_units(attr)
 
                 if not units_helper.is_typed_by_quantity_value(attr):
-                    units_helper.set_units(attr, units)
+                    try:
+                        units_helper.set_units(attr, units)
+
+                    except CustomUndefinedUnitError:
+                        # Check if the unit is unsupported in SysML
+                        graceful_units_helper.set_units(attr, units)
+                        unsupported_units.add(units)
+
                     assert units_helper.get_units(attr)[0] == units
 
                     if units_attr is not None:
@@ -577,7 +647,15 @@ def test_set_quantity(units_tests_model):
                 assert units == quantity.units
 
             # Set by quantity
-            units_helper.set_quantity(attr, quantity)
+            try:
+                units_helper.set_quantity(attr, quantity)
+
+            except CustomUndefinedUnitError:
+                # Check if the unit is unsupported in SysML
+                graceful_units_helper.set_quantity(attr, quantity)
+                is_unsupported_in_sysml = True
+                unsupported_units.add(quantity.units)
+
             _assert_get_quantity()
 
             # Set by value and SysML units attribute
@@ -586,12 +664,19 @@ def test_set_quantity(units_tests_model):
                 canon_units_attr = units_helper.get_sysml_units(quantity.units)
 
             except UndefinedUnitError:
-                # If it is not a compound unit or "percentage", indeed this should be an error
-                if len(list(quantity.units._units.unit_items())) == 1 and not is_percentage:
+                # If it is not a compound unit or "percentage" or otherwise unsupported, indeed this should be an error
+                if (len(list(quantity.units._units.unit_items())) == 1 and not is_percentage and
+                        not is_unsupported_in_sysml):
                     raise
                 canon_units_attr = quantity.units
 
-            units_helper.set_value_and_units(attr, quantity.magnitude, canon_units_attr)
+            try:
+                units_helper.set_value_and_units(attr, quantity.magnitude, canon_units_attr)
+                assert not is_unsupported_in_sysml
+            except CustomUndefinedUnitError:
+                assert is_unsupported_in_sysml
+                graceful_units_helper.set_value_and_units(attr, quantity.magnitude, canon_units_attr)
+
             _assert_get_quantity()
 
             # Set by original units attribute
@@ -600,6 +685,8 @@ def test_set_quantity(units_tests_model):
                 _assert_get_quantity(do_raise=False)
 
         print(units_helper.to_text(doc.root_node))
+
+        assert ureg('pixel').units in unsupported_units
 
 
 def test_set_combined_unit(empty_sysml_model):

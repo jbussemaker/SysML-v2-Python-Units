@@ -15,6 +15,7 @@ Convert units and quantities between standard [SysML v2](https://www.omg.org/sys
 - Supports percentages
 - Conversion functions between SysML v2 units and Pint `Unit`, and string parsing functions
 - Derive preferred units for a quantity type, for example `kg` for an `ISQ::mass` quantity
+- Gracefully handle units that are not supported by SysML v2: stored as `doc units /* <units> */` (opt-in)
 - Syside Automator [`ReferencePrinter`](https://docs.sensmetry.com/python/latest/syside/ReferencePrinter.html) for
   printing unit references using their short name
 - Extensive caching to make units lookup fast

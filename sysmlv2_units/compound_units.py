@@ -2,7 +2,7 @@ import math
 import syside
 import logging
 from typing import Tuple, Optional, Union, List
-from pint import Unit, UndefinedUnitError
+from pint import Unit, UndefinedUnitError, PintError
 from pint.util import UnitsContainer
 from pint.facets.plain import UnitDefinition, ScaleConverter, PrefixDefinition
 
@@ -83,6 +83,13 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             # Parse the units attr to Pint units
             units, _ = self._parse_units_attr(units_attr, raise_if_unknown_unit=raise_if_unknown_unit)
             return units, units_attr
+
+        # Parse a string literal
+        if isinstance(units_expression, syside.LiteralString):
+
+            value = units_expression.value or ''
+            units = self.parse_python_units(value, raise_if_unknown_unit=raise_if_unknown_unit)
+            return units, None
 
         # Parse an exponent value (as part of parsing a units expression)
         if (isinstance(units_expression, syside.LiteralInteger) or
@@ -183,7 +190,7 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
     @classmethod
     def _simple_parse_value(cls, expression: syside.Expression):
-        """Parses int, real, inf, null (NaN) values, positive or negative."""
+        """Parses str, bool, int, real, inf, null (NaN) values, positive or negative."""
 
         # Parse a list
         if isinstance(expression, syside.OperatorExpression) and expression.operator == syside.Operator.Comma:
@@ -220,6 +227,10 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             return math.nan
         if isinstance(expression, syside.LiteralInfinity):
             return -math.inf if is_negation else math.inf
+
+        # Parse bool and str
+        if isinstance(expression, (syside.LiteralBoolean, syside.LiteralString)):
+            return expression.value
 
         raise ValueError(f'Could not parse simple expression: {expression}')
 
@@ -388,10 +399,14 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
             if isinstance(converter, ScaleConverter):
                 reference = units_definition.reference
-                mapped_units = ureg(f'{reference}**{exponent}').units
+                try:
+                    mapped_units = ureg(f'{reference}**{exponent}').units
 
-                scale = converter.scale
-                return mapped_units, scale
+                    scale = converter.scale
+                    return mapped_units, scale
+
+                except PintError:
+                    pass
 
         raise CustomUndefinedUnitError(unit_str, msg=f'Could not get units definition: {unit_str}')
 
@@ -408,11 +423,23 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
     @classmethod
     def _set_simple_value(cls, feature: syside.Feature, value):
-        """Sets positive or negative int, real, inf or null (NaN) values."""
+        """Sets positive or negative int, real, inf, null (NaN), string or bool values."""
+
+        # Set str value
+        if isinstance(value, str):
+            _, literal = feature.feature_value_member.set_member_element(syside.LiteralString)
+            literal.value = value
+            return
+
+        # Set bool value
+        if isinstance(value, bool):
+            _, literal = feature.feature_value_member.set_member_element(syside.LiteralBoolean)
+            literal.value = value
+            return
 
         # Create minus operator if needed
         value_feature = feature
-        if value < 0:
+        if value is not None and value < 0:
             value_feature = cls._set_minus_operator(value_feature)
             value = -value
 

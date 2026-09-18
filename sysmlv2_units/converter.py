@@ -32,6 +32,7 @@ class SysMLUnitsConverter:
     Raises an `UndefinedUnitError` if any unit parsing or conversion to/from SysML fails.
     """
 
+    dimensionless_units_str = '-'
     dimensionless_units_pint = ureg.dimensionless
     dimensionless_units_sysml_key = 'MeasurementReferences::one'
 
@@ -242,7 +243,7 @@ class SysMLUnitsConverter:
             return units
 
         # Check if the units are empty
-        if not units:
+        if not units or units == cls.dimensionless_units_str:
             return
 
         # Replace pretty-printed SysML-style multiplication with pint-style
@@ -269,6 +270,41 @@ class SysMLUnitsConverter:
 
         if cls.do_log:
             log.debug(f'Could not parse "{units}" to pint units')
+
+    @classmethod
+    def units_to_str(cls, units: Union[Unit, str, syside.AttributeUsage], sysml_style=False) -> str:
+        """
+        Convert units to normalized strings, optionally formatted in pretty-printed SysML-style.
+        Dimensionless is rendered as an empty string.
+        """
+
+        # Catch empty units
+        if not units:
+            return ''
+
+        # Try to convert SysML units to Pint units for normalization
+        if isinstance(units, syside.AttributeUsage):
+            try:
+                units = cls.get_python_units(units)
+                if units is None:
+                    return ''
+
+            except UndefinedUnitError:
+                # If not found, just print the name or short name
+                return units.short_name or units.name
+
+        # Print Pint units as str
+        if isinstance(units, Unit):
+            if units == cls.dimensionless_units_pint:
+                return ''
+
+            if sysml_style:
+                return f'{units:S}'
+            return f'{units:~P}'
+
+        if units == cls.dimensionless_units_str:
+            return ''
+        return str(units)
 
     def quantity(self, value: float, units: Unit = None) -> Quantity:
         """Quantity object factory"""

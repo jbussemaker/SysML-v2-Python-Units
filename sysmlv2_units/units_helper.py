@@ -20,6 +20,11 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
     existing units through operations like division, multiplication, exponentiation, etc.).
 
     Raises an `UndefinedUnitError` if any unit parsing or conversion to/from SysML fails.
+
+    If units are not supported in SysML, you can still save the units in the SysML model by setting
+    `graceful_if_sysml_unsupported=True`. Unsupported units are then stored as a doc on the feature, and are therefore
+    not semantically recognized by the SysML model anymore, so be careful with this behavior.
+    For example: `attribute resolution = 2048 { doc units /* pixel */ }`
     """
 
     _binary_operators = {
@@ -29,9 +34,15 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         syside.Operator.ExponentCaret: '^',
     }
 
+    _units_doc_name = 'units'
+
     ###################################################################
     ### SysML to Python (pint) conversion functions (SysML getters) ###
     ###################################################################
+
+    def __init__(self, model: syside.Model, graceful_if_sysml_unsupported=False):
+        super().__init__(model)
+        self.graceful_if_sysml_unsupported = graceful_if_sysml_unsupported
 
     def get_quantity(self, feature: Union[syside.Feature, syside.Expression], raise_if_unknown_unit=True) -> Quantity:
         """
@@ -80,10 +91,23 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
                     preferred_units = self.get_quantity_value_units(feature, raise_if_unknown_unit=raise_if_unknown_unit)
                     return preferred_units, None
 
-                # Directly try to parse a unit set as the feature value
+            # Try to parse a unit set as the feature value
+            feature_value_error = None
+            try:
                 parsed_units, units_attr = self._parse_units_attr(feature, raise_if_unknown_unit=raise_if_unknown_unit)
                 if parsed_units is not None:
                     return parsed_units, units_attr
+
+            except UndefinedUnitError as e:
+                feature_value_error = e
+
+            # Parse units from doc
+            doc_units, has_units_doc = self._get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            if has_units_doc:
+                return doc_units, None
+
+            if feature_value_error is not None:
+                raise feature_value_error
 
             raise ValueError(f'No feature value set on feature: {feature}')
 
@@ -96,6 +120,9 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         """
         Parses a feature value and returns the (pint) units if set.
         Returns the (contained) feature that contains the value, so that should still be parsed.
+
+        Supports units defined as a str in a quantity expression: `attribute attr = 10['kg'];`
+        Supports units defined as the feature's units doc: `attribute attr = 10 { doc units /* kg */ }`
         """
 
         # Get the value expression to parse
@@ -139,7 +166,34 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
             else:
                 units = units_attr = None
 
+        # If no units were found, try to parse from units doc
+        if units is None and units_attr is None and isinstance(feature, syside.Feature):
+            units_from_docs, has_docs = self._get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            if has_docs:
+                units = units_from_docs
+
         return value_expression, is_negation, units, units_attr
+
+    @classmethod
+    def _get_units_from_doc(cls, feature: syside.Feature, raise_if_unknown_unit=True) -> Tuple[Optional[Unit], bool]:
+        """Parse units from the units doc. Also returns if the docs were set."""
+
+        # Get units doc
+        units_doc = cls._get_units_doc(feature)
+        if units_doc is None:
+            return None, False
+
+        # Parse the unit
+        units_str = units_doc.body or ''
+        units = cls.parse_python_units(units_str, raise_if_unknown_unit=raise_if_unknown_unit)
+        return units, True
+
+    @classmethod
+    def _get_units_doc(cls, feature: syside.Feature) -> Optional[syside.Documentation]:
+        """Get the units doc element of a feature if it has one."""
+        for doc_el in feature.children.elements:
+            if isinstance(doc_el, syside.Documentation) and doc_el.name == cls._units_doc_name:
+                return doc_el
 
     #######################################################################
     ### Python (pint/str) to SysML conversion functions (SysML setters) ###
@@ -167,12 +221,15 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         self._set_simple_value(value_feature, value*scale)
 
     def set_units(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage],
-                  raise_if_unknown_unit=True) -> float:
+                  raise_if_unknown_unit=True, graceful_if_sysml_unsupported=None) -> float:
         """
         Set the feature value to a unit.
 
         Returns the scale of the associated value in case any unit conversion was needed.
         For example: 1 kW --> W with scale 1000 --> so multiply the value by 1000 --> 1000 W
+
+        If the unit is not supported in SysML and `graceful_if_sysml_unsupported=True`, the unit is written as a
+        literal string value.
         """
 
         # Parse units if needed
@@ -195,12 +252,58 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
                 syside.FeatureReferenceExpression)
 
             reference_expression.referent_member.set_member_element(units_attr)
+            self._remove_units_doc(feature)
             return 1.
 
         # Try to set compound units
         assert isinstance(units, Unit)
-        scale = self._build_units_expression(feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
-        return scale
+        unsupported_graceful = self.graceful_if_sysml_unsupported \
+            if graceful_if_sysml_unsupported is None else graceful_if_sysml_unsupported
+
+        try:
+            scale = self._build_units_expression(
+                feature, units, raise_if_unknown_unit=raise_if_unknown_unit or unsupported_graceful)
+            self._remove_units_doc(feature)
+            return scale
+
+        except UndefinedUnitError:
+            if not unsupported_graceful:
+                raise
+
+            # If the units are not supported by SysML, but we want to be graceful about it,
+            # we set the units as a string literal
+            self._remove_units_doc(feature)
+            self._set_simple_value(feature, self.units_to_str(units, sysml_style=True))
+
+    def set_units_doc(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None):
+        """
+        Set the units doc of a feature to the string representation of a unit. For example:
+        ```
+        attribute myAttr {
+            doc units /* kg */
+        }
+        ```
+        """
+
+        # Convert to str
+        units_str = self.units_to_str(units, sysml_style=True)
+        if not units_str:
+            units_str = self.dimensionless_units_str
+
+        # Create docs if needed
+        units_doc = self._get_units_doc(feature)
+        if units_doc is None:
+            _, units_doc = feature.children.insert(0, syside.OwningMembership, syside.Documentation)
+            units_doc.declared_name = self._units_doc_name
+
+        units_doc.body = units_str
+
+    def _remove_units_doc(self, feature: syside.Feature):
+        """Remove the units doc if set."""
+
+        units_doc = self._get_units_doc(feature)
+        if units_doc:
+            feature.children.remove_element(units_doc)
 
     def _set_feature_value_quantity(self, feature: syside.Feature, units: Union[Unit, str, syside.AttributeUsage] = None,
                                     raise_if_unknown_unit=True) -> Tuple[syside.Feature, float]:
@@ -214,6 +317,7 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
 
             # Check if dimensionless
             if units == self.dimensionless_units_sysml:
+                self._remove_units_doc(feature)
                 return feature, 1.
 
         else:
@@ -221,6 +325,7 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
 
             # Check if dimensionless
             if not units:
+                self._remove_units_doc(feature)
                 return feature, 1.
 
         # Create a new Quantity expression
@@ -234,6 +339,25 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         units_feature: syside.Feature
         _, units_feature = quantity_expression.children.append(syside.ParameterMembership, syside.Feature)
 
-        scale = self.set_units(units_feature, units, raise_if_unknown_unit=raise_if_unknown_unit)
+        # Note: if the units are not supported, but we want to be graceful about it, we want the `set_units` function
+        # to raise an error, so we can roll back the quantity expression here and set the units as a doc
+        unsupported_graceful = self.graceful_if_sysml_unsupported
+        try:
+            scale = self.set_units(
+                units_feature, units, raise_if_unknown_unit=raise_if_unknown_unit or unsupported_graceful,
+                graceful_if_sysml_unsupported=False)
+
+            self._remove_units_doc(feature)
+
+        except UndefinedUnitError:
+            if not unsupported_graceful:
+                raise
+
+            # Roll back quantity expression and set units as a doc
+            feature.feature_value_member.remove_member_element()
+            value_feature = feature
+            scale = 1.
+
+            self.set_units_doc(feature, units)
 
         return value_feature, scale
