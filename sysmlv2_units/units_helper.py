@@ -63,8 +63,15 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         if is_negation:
             value = -value
 
-        # Return a Pint quantity object
-        return self.quantity(value, units)
+        # Return a quantity object
+        quantity = self.quantity(value, units)
+
+        # Convert to other requested units if needed
+        doc_units, has_units_doc = self.get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+        if has_units_doc and doc_units:
+            return quantity.to(doc_units)
+
+        return quantity
 
     def get_units(self, feature: Union[syside.Feature, syside.Expression], raise_if_unknown_unit=True) \
             -> Tuple[Optional[Unit], Optional[syside.AttributeUsage]]:
@@ -76,11 +83,18 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         Also returns the original units attribute that was set (if applicable).
         """
 
-        # Check if the feature has a value
+        # Check if a units doc is set, if yes we return this, because these would be the units in which we would want to
+        # return the quantity value so it has higher priority than anything else
+        doc_units, has_units_doc = self.get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+        if has_units_doc:
+            return doc_units, None
+
+        # Check if the feature has no value
         if (isinstance(feature, syside.Feature) and not isinstance(feature, syside.Expression)
                 and feature.feature_value is None):
 
-            # If not, check if the feature itself is a unit
+            # Check if the feature itself is a unit
+            feature_value_error = None
             if isinstance(feature, syside.AttributeUsage):
                 # Check if the value is the dimensionless unit
                 if feature == self.dimensionless_units_sysml:
@@ -91,18 +105,16 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
                     preferred_units = self.get_quantity_value_units(feature, raise_if_unknown_unit=raise_if_unknown_unit)
                     return preferred_units, None
 
-            # Try to parse a unit set as the feature value
-            feature_value_error = None
-            try:
-                parsed_units, units_attr = self._parse_units_attr(feature, raise_if_unknown_unit=raise_if_unknown_unit)
-                if parsed_units is not None:
-                    return parsed_units, units_attr
+                # Check if the feature references or is an alias of a unit attribute
+                try:
+                    parsed_units, units_attr = self._parse_units_attr(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+                    if parsed_units is not None:
+                        return parsed_units, units_attr
 
-            except UndefinedUnitError as e:
-                feature_value_error = e
+                except UndefinedUnitError as e:
+                    feature_value_error = e
 
-            # Parse units from doc
-            doc_units, has_units_doc = self.get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            # Return units from doc
             if has_units_doc:
                 return doc_units, None
 
@@ -263,7 +275,13 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         try:
             scale = self._build_units_expression(
                 feature, units, raise_if_unknown_unit=raise_if_unknown_unit or unsupported_graceful)
-            self._remove_units_doc(feature)
+
+            # Save original units if the unit could not exactly be reconstructed (and the feature is not anonymous)
+            if scale != 1 and feature.name:
+                self.set_units_doc(units)
+            else:
+                self._remove_units_doc(feature)
+
             return scale
 
         except UndefinedUnitError:
@@ -347,7 +365,11 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
                 units_feature, units, raise_if_unknown_unit=raise_if_unknown_unit or unsupported_graceful,
                 graceful_if_sysml_unsupported=False)
 
-            self._remove_units_doc(feature)
+            # Save original units if the unit could not exactly be reconstructed
+            if scale != 1:
+                self.set_units_doc(feature, units)
+            else:
+                self._remove_units_doc(feature)
 
         except UndefinedUnitError:
             if not unsupported_graceful:

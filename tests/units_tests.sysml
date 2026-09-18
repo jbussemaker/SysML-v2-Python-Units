@@ -76,4 +76,8 @@ package AttrUnits {
     attribute docUnits { doc _units /* pixel */ }
     attribute strQuantity = 3.14 ["pixel"];
     attribute docQuantity = 96 { doc _units /* pixel */ }
+
+    attribute yearValue = 73.05 [hecto*SI::day] {
+        doc _units /* year */
+    }
 }

@@ -2,6 +2,7 @@ import math
 import pytest
 import syside
 import pathlib
+from typing import List
 from pint import OffsetUnitCalculusError
 from sysmlv2_units import SysMLUnitsHelper, UndefinedUnitError, ureg
 from sysmlv2_units.converter import CustomUndefinedUnitError
@@ -284,7 +285,7 @@ def test_get_quantity(units_tests_model):
     with units_tests_model.documents[0].lock() as doc:
         package = doc.root_node.children.elements[0]
         assert isinstance(package, syside.Package)
-        elements = package.children.elements
+        elements: List[syside.AttributeUsage] = package.children.elements
 
         for _ in range(2):
             attr: syside.AttributeUsage = elements[3]
@@ -586,6 +587,13 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('pixel').units, None)
             assert units_helper.get_quantity(attr) == ureg('96 pixel')
 
+            attr = elements[54]
+            assert attr.name == 'yearValue'
+            assert units_helper.get_units(attr) == (ureg('year').units, None)
+            q = units_helper.get_quantity(attr)
+            assert q == ureg('20 year')
+            assert str(q) == '20.0 year'
+
 
 def test_set_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
@@ -595,9 +603,9 @@ def test_set_quantity(units_tests_model):
         quantity_ = units_helper.get_quantity(attr, raise_if_unknown_unit=do_raise)
         if math.isnan(quantity.magnitude):
             assert math.isnan(quantity_.magnitude)
-            assert quantity_.units == quantity.units
         else:
             assert quantity_ == quantity
+        assert quantity_.units == quantity.units
 
     with units_tests_model.documents[0].lock() as doc:
         package = doc.root_node.children.elements[0]
@@ -605,9 +613,9 @@ def test_set_quantity(units_tests_model):
         elements = package.children.elements
 
         unsupported_units = set()
+        attr: syside.AttributeUsage
         for attr in elements[3:]:
             print(attr.name)
-            is_unsupported_in_sysml = False
             try:
                 quantity = units_helper.get_quantity(attr)
 
@@ -647,6 +655,7 @@ def test_set_quantity(units_tests_model):
                 assert units == quantity.units
 
             # Set by quantity
+            is_unsupported_in_sysml = False
             try:
                 units_helper.set_quantity(attr, quantity)
 
@@ -658,15 +667,19 @@ def test_set_quantity(units_tests_model):
 
             _assert_get_quantity()
 
-            # Set by value and SysML units attribute
             is_percentage = quantity.units == ureg['%']
+            _, has_explicit_units_doc = units_helper.get_units_from_doc(attr)
+            if is_unsupported_in_sysml:
+                assert has_explicit_units_doc
+
+            # Set by value and SysML units attribute
             try:
                 canon_units_attr = units_helper.get_sysml_units(quantity.units)
 
             except UndefinedUnitError:
-                # If it is not a compound unit or "percentage" or otherwise unsupported, indeed this should be an error
+                # If it is not a compound unit or "percentage" or explicitly set, indeed this should be an error
                 if (len(list(quantity.units._units.unit_items())) == 1 and not is_percentage and
-                        not is_unsupported_in_sysml):
+                        not has_explicit_units_doc):
                     raise
                 canon_units_attr = quantity.units
 
