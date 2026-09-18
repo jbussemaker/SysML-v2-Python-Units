@@ -442,11 +442,12 @@ class SysMLUnitsConverter:
             del sysml_alias_map[units_attr_key]
 
         # Map all SysML units to pint units (more robust, because compound pint units are order-independent)
+        init_do_log = cls.do_log
         cls.do_log = False
         for units_attr_key in sysml_alias_map:
             cls.get_python_units(units_attr_key, raise_if_unknown_unit=False)
 
-        cls.do_log = True
+        cls.do_log = init_do_log
 
     ################################
     ### SysML printing functions ###
