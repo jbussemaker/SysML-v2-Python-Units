@@ -174,7 +174,8 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
             if units_attr.feature_value is not None:
                 parsed_units, value_units_attr = self._parse_units_feature(
                     units_attr.feature_value.value, raise_if_unknown_unit=False)
-                if parsed_units is not None:
+
+                if parsed_units is not None and isinstance(parsed_units, Unit):
                     return parsed_units, value_units_attr
 
             # Try to parse a unit by subsetting

@@ -73,7 +73,7 @@ package AttrUnits {
     attribute tsfc = 5 [SI::g / (SIPrefixes::kilo * SI::N * SI::s)]; // https://en.wikipedia.org/wiki/Thrust-specific_fuel_consumption
 
     attribute strUnits = "pixel";
-    attribute docUnits { doc units /* pixel */ }
+    attribute docUnits { doc _units /* pixel */ }
     attribute strQuantity = 3.14 ["pixel"];
-    attribute docQuantity = 96 { doc units /* pixel */ }
+    attribute docQuantity = 96 { doc _units /* pixel */ }
 }

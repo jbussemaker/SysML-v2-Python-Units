@@ -34,7 +34,7 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         syside.Operator.ExponentCaret: '^',
     }
 
-    _units_doc_name = 'units'
+    _units_doc_name = '_units'
 
     ###################################################################
     ### SysML to Python (pint) conversion functions (SysML getters) ###
@@ -102,7 +102,7 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
                 feature_value_error = e
 
             # Parse units from doc
-            doc_units, has_units_doc = self._get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            doc_units, has_units_doc = self.get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
             if has_units_doc:
                 return doc_units, None
 
@@ -168,14 +168,14 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
 
         # If no units were found, try to parse from units doc
         if units is None and units_attr is None and isinstance(feature, syside.Feature):
-            units_from_docs, has_docs = self._get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            units_from_docs, has_docs = self.get_units_from_doc(feature, raise_if_unknown_unit=raise_if_unknown_unit)
             if has_docs:
                 units = units_from_docs
 
         return value_expression, is_negation, units, units_attr
 
     @classmethod
-    def _get_units_from_doc(cls, feature: syside.Feature, raise_if_unknown_unit=True) -> Tuple[Optional[Unit], bool]:
+    def get_units_from_doc(cls, feature: syside.Feature, raise_if_unknown_unit=True) -> Tuple[Optional[Unit], bool]:
         """Parse units from the units doc. Also returns if the docs were set."""
 
         # Get units doc
