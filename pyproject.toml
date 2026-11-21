@@ -17,7 +17,7 @@ classifiers = [
 dynamic = ["version"]
 requires-python = ">=3.12"
 dependencies = [
-    "syside",
+    "syside~=0.11.0",
     "pint",
 ]
 

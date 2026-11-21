@@ -20,24 +20,24 @@ class SysMLQuantityValueMapper(SysMLUnitsConverter):
 
     def __init__(self, model: syside.Model):
         super().__init__(model)
-        doc_namespace_map = self._doc_namespace_map
+        model_name_index = self._model_name_index
 
         # Load some base elements from the SysML standard library
-        self.quantity_value_base_def = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+        self.quantity_value_base_def = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
             'Quantities::TensorQuantityValue', syside.AttributeDefinition, env=True)
 
-        self.dimensionless_units_def_sysml = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+        self.dimensionless_units_def_sysml = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
             'MeasurementReferences::DimensionOneUnit', syside.AttributeDefinition, env=True)
 
         # Initialize mapping from quantity value types to default units
         if len(self.__class__._sysml_quantities_units_map) == 0:
             isq = SysMLHelper.get_element_by_qualified_name(
-                model, doc_namespace_map, 'ISQBase::isq', syside.AttributeUsage, env=True)
+                model, model_name_index, "ISQBase::'International System of Quantities'", syside.AttributeUsage, env=True)
             si = SysMLHelper.get_element_by_qualified_name(
-                model, doc_namespace_map, 'SI::si', syside.AttributeUsage, env=True)
+                model, model_name_index, "SI::'ISO/IEC 80000 International System of Units'", syside.AttributeUsage, env=True)
 
             dimensionless_quantities = [
-                SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+                SysMLHelper.get_element_by_qualified_name(model, model_name_index,
                     'MeasurementReferences::DimensionOneValue', syside.AttributeDefinition, env=True),
                 self.dimensionless_units_def_sysml,
             ]

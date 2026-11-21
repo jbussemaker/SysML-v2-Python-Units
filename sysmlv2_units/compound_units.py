@@ -36,13 +36,14 @@ class SysMLCompoundUnitsHelper(SysMLQuantityValueMapper):
 
     def __init__(self, model: syside.Model):
         super().__init__(model)
-        doc_namespace_map = self._doc_namespace_map
+        model_name_index = self._model_name_index
 
-        self.unit_prefix_def = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+        self.unit_prefix_def = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
             'MeasurementReferences::UnitPrefix', syside.AttributeDefinition, env=True)
 
         self._sysml_prefix_map = sysml_prefix_map = {}
-        prefixes_package = SysMLHelper.search_namespace(model, doc_namespace_map, 'SIPrefixes', env=True)
+        prefixes_package = SysMLHelper.get_element_by_qualified_name(
+            model, model_name_index, 'SIPrefixes', syside.LibraryPackage, env=True)
         for attr in prefixes_package.children.elements:
             if isinstance(attr, syside.AttributeUsage) and attr.specializes(self.unit_prefix_def):
                 sysml_prefix_map[attr.name] = attr

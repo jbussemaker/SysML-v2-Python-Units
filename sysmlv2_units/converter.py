@@ -1,4 +1,5 @@
 import syside
+import syside.query
 import logging
 from collections import OrderedDict
 from typing import Optional, Union, Dict, List
@@ -74,22 +75,25 @@ class SysMLUnitsConverter:
     do_log = False
 
     def __init__(self, model: syside.Model):
-        self._doc_namespace_map = doc_namespace_map = {}
+        self._model_name_index = model_name_index = syside.query.build_name_index(
+            model, library_elements=syside.query.LibraryElements.ALL)
 
         # Load some base elements from the SysML standard library
-        self.unit_base_def = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+        self.unit_base_def = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
             'MeasurementReferences::MeasurementUnit', syside.AttributeDefinition, env=True)
-        self.scale_base_def = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+        self.scale_base_def = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
             'MeasurementReferences::MeasurementScale', syside.AttributeDefinition, env=True)
 
-        self.dimensionless_units_sysml = SysMLHelper.get_element_by_qualified_name(model, doc_namespace_map,
+        self.dimensionless_units_sysml = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
             'MeasurementReferences::one', syside.AttributeUsage, env=True)
         self.__class__.dimensionless_units_sysml_key = self._sysml_attr_key(self.dimensionless_units_sysml)
 
         # Load the units libraries and initialize unit mapping caches
         self.units_libraries = [
-            SysMLHelper.search_namespace(model, doc_namespace_map, 'SI', env=True),
-            SysMLHelper.search_namespace(model, doc_namespace_map, 'USCustomaryUnits', env=True),
+            SysMLHelper.get_element_by_qualified_name(
+                model, model_name_index, 'SI', syside.LibraryPackage, env=True),
+            SysMLHelper.get_element_by_qualified_name(
+                model, model_name_index, 'USCustomaryUnits', syside.LibraryPackage, env=True),
         ]
         sysml_alias_map, sysml_units_map, self._sysml_obj_map = self._get_sysml_units_map()
         self._init_mappings(sysml_units_map, sysml_alias_map)
