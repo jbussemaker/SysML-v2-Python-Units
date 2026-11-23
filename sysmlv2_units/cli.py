@@ -41,7 +41,7 @@ def list_quantity_types(_):
 
         name = quantity_value_def.name
 
-        doc = (list(quantity_value_def.documentation)[0].body or '').split('\n')
+        doc = (quantity_value_def.documentation.collect()[0].body or '').split('\n')
         description = ''
         for line in doc:
             if line.startswith('source:'):

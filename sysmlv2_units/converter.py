@@ -402,7 +402,7 @@ class SysMLUnitsConverter:
 
         # Loop over all unit elements
         for library in self.units_libraries:
-            for units_attr in library.owned_elements:
+            for units_attr in library.owned_elements.collect():
                 if (isinstance(units_attr, syside.AttributeUsage) and
                         (units_attr.specializes(self.unit_base_def) or units_attr.specializes(self.scale_base_def))):
 

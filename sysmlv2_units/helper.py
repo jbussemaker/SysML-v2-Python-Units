@@ -14,7 +14,7 @@ class SysMLHelper:
 
     @staticmethod
     def get_feature_by_name(element: syside.Type, name: str) -> Optional[syside.Feature]:
-        for feature in element.features:
+        for feature in element.features.collect():
             if feature.name == name:
                 return feature
 
