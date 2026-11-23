@@ -1,5 +1,6 @@
 import syside
 import syside.query
+import pathlib
 import logging
 from collections import OrderedDict
 from typing import Optional, Union, Dict, List
@@ -75,8 +76,8 @@ class SysMLUnitsConverter:
     do_log = False
 
     def __init__(self, model: syside.Model):
-        self._model_name_index = model_name_index = syside.query.build_name_index(
-            model, library_elements=syside.query.LibraryElements.ALL)
+        self.model = model
+        self._model_name_index = model_name_index = SysMLHelper.create_name_index(model)
 
         # Load some base elements from the SysML standard library
         self.unit_base_def = SysMLHelper.get_element_by_qualified_name(model, model_name_index,
@@ -234,35 +235,28 @@ class SysMLUnitsConverter:
             raise CustomUndefinedUnitError(str(units), msg=msg)
 
     @classmethod
-    def parse_python_units(cls, units: Union[Unit, str] = None, raise_if_unknown_unit=True) -> Optional[Unit]:
-        """Parses a str to Python/pint unit if needed. Returns None for dimensionless."""
+    def parse_python_quantity(cls, quantity: Union[Quantity, Unit, str], raise_if_unknown_unit=True) -> Optional[Quantity]:
+        """Parses a str to Python/pint quantity if needed."""
 
-        # Check if we already have a Unit object
-        if isinstance(units, Unit):
-
-            # Check if it is dimensionless
-            if units == cls.dimensionless_units_pint:
-                return
-
-            return units
-
-        # Check if the units are empty
-        if not units or units == cls.dimensionless_units_str:
-            return
+        # Check if we already have a pint object
+        if isinstance(quantity, Unit):
+            quantity = 1*quantity
+        if isinstance(quantity, Quantity):
+            return quantity
 
         # Replace pretty-printed SysML-style multiplication with pint-style
-        if isinstance(units, str):
-            units = units.replace('⋅', '·')
+        if isinstance(quantity, str):
+            quantity = quantity.replace('⋅', '·')
 
         # Try to parse the units using pint
         try:
-            parsed_units = ureg(units).units
+            parsed_quantity = ureg(quantity)
 
-            # Check if dimensionless
-            if parsed_units == cls.dimensionless_units_pint:
-                return
+            # Check if unitless
+            if isinstance(parsed_quantity, (int, float)):
+                return cls.quantity(parsed_quantity, cls.dimensionless_units_pint)
 
-            return parsed_units
+            return parsed_quantity
 
         except UndefinedUnitError:
             if raise_if_unknown_unit:
@@ -270,13 +264,31 @@ class SysMLUnitsConverter:
 
         except Exception as e:
             if raise_if_unknown_unit:
-                raise CustomUndefinedUnitError(units, msg=str(e))
+                raise CustomUndefinedUnitError(quantity, msg=str(e))
 
         if cls.do_log:
-            log.debug(f'Could not parse "{units}" to pint units')
+            log.debug(f'Could not parse "{quantity}" to pint units')
 
     @classmethod
-    def units_to_str(cls, units: Union[Unit, str, syside.AttributeUsage], sysml_style=False) -> str:
+    def parse_python_units(cls, units: Union[Unit, str] = None, raise_if_unknown_unit=True) -> Optional[Unit]:
+        """Parses a str to Python/pint unit if needed. Returns None for dimensionless."""
+
+        # Check if the units are empty
+        if not units or (isinstance(units, str) and units == cls.dimensionless_units_str):
+            return
+
+        quantity = cls.parse_python_quantity(units, raise_if_unknown_unit=raise_if_unknown_unit)
+
+        if quantity is not None and isinstance(quantity, Quantity):
+            units = quantity.units
+
+            if units == cls.dimensionless_units_pint:
+                return
+
+            return units
+
+    @classmethod
+    def units_to_str(cls, units: Union[Quantity, Unit, str, syside.AttributeUsage], sysml_style=False) -> str:
         """
         Convert units to normalized strings, optionally formatted in pretty-printed SysML-style.
         Dimensionless is rendered as an empty string.
@@ -298,21 +310,25 @@ class SysMLUnitsConverter:
                 return units.short_name or units.name
 
         # Print Pint units as str
-        if isinstance(units, Unit):
-            if units == cls.dimensionless_units_pint:
+        if isinstance(units, (Unit, Quantity)):
+            if isinstance(units, Unit) and units == cls.dimensionless_units_pint:
                 return ''
 
             if sysml_style:
-                return f'{units:S}'
+                if isinstance(units, Unit):
+                    return f'{units:S}'
+                else:
+                    return f'{units.magnitude} {units.units:S}'
             return f'{units:~P}'
 
         if units == cls.dimensionless_units_str:
             return ''
         return str(units)
 
-    def quantity(self, value: float, units: Unit = None) -> Quantity:
+    @classmethod
+    def quantity(cls, value: float, units: Unit = None) -> Quantity:
         """Quantity object factory"""
-        return ureg.Quantity(value, units or self.dimensionless_units_pint)
+        return ureg.Quantity(value, units or cls.dimensionless_units_pint)
 
     def _get_cache_from_pint(self, pint_units: Unit, raise_if_unknown_unit=True) -> Optional[syside.AttributeUsage]:
         units_attr_key = self._load_cache_from_pint(pint_units, raise_if_unknown_unit=raise_if_unknown_unit)
@@ -355,7 +371,7 @@ class SysMLUnitsConverter:
         return pint_units
 
     @staticmethod
-    def _sysml_attr_key(sysml_attr: syside.AttributeUsage):
+    def _sysml_attr_key(sysml_attr: syside.Type):
         """Normalize a SysMl attr to its qualified name,
         so that we can reuse the SysML-side cache across Syside model instances"""
         if sysml_attr == _UNKNOWN_UNIT or isinstance(sysml_attr, str):
@@ -453,6 +469,10 @@ class SysMLUnitsConverter:
 
         cls.do_log = init_do_log
 
+    @classmethod
+    def get_mapped_units(cls) -> List[Unit]:
+        return list(cls._pint_sysml_units_map.keys())
+
     ################################
     ### SysML printing functions ###
     ################################
@@ -464,13 +484,16 @@ class SysMLUnitsConverter:
         from pint.delegates.formatter._format_helpers import pretty_fmt_exponent
         from pint.delegates.formatter._compound_unit_helpers import to_symbol_exponent_name
 
+        if str(units) == 'dimensionless':
+            return ''
+
         return '⋅'.join([
             to_symbol_exponent_name((u, p), registry=registry)[0] +
             (pretty_fmt_exponent(p) if p != 1 else '')
             for u, p in units.items()])
 
     @classmethod
-    def to_text(cls, element: syside.Element, printer_config: syside.PrinterConfig = None):
+    def to_text(cls, element: syside.Element, printer_config: syside.PrinterConfig = None, kerml_mode=False):
         """
         Render an element as SysML v2 textual notation, using the units ReferencePrinter so that units are printed
         using their short names.
@@ -486,10 +509,37 @@ class SysMLUnitsConverter:
         reference_printer = cls.get_reference_printer()
 
         # Create the printer and print the model
-        printer = syside.ModelPrinter.sysml(reference_printer=reference_printer)
+        if kerml_mode:
+            printer = syside.ModelPrinter.kerml(reference_printer=reference_printer)
+        else:
+            printer = syside.ModelPrinter.sysml(reference_printer=reference_printer)
         sysml_text = syside.pprint(element, printer, printer_config)
 
         return sysml_text
+
+    @classmethod
+    def write_document(cls, doc: syside.Document, path: pathlib.Path = None):
+        """
+        Write a document as SysML v2 textual notation to the path it was loaded from, or to a new path if provided.
+        """
+
+        if path is None:
+            # Get path from the doc's URL
+            doc_url = str(doc.url)
+            try:
+                assert doc_url.startswith('file:')
+                path = pathlib.Path(doc.url.path)
+                if isinstance(path, pathlib.WindowsPath) and doc.url.path[0] == '/':
+                    path = pathlib.Path(doc.url.path[1:])
+
+            except AssertionError:
+                raise RuntimeError(f'Could not resolve path from doc URL:\n  {doc_url}\n  {doc.url.path})\n  {path}')
+
+        # Serialize as text and write to file
+        with open(path, 'wb') as fp:
+            fp.write(cls.to_text(doc.root_node).encode('utf-8'))
+
+        return path
 
     @classmethod
     def get_reference_printer(cls) -> syside.ReferencePrinter:

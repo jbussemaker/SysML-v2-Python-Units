@@ -127,6 +127,27 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
         _, _, units, units_attr = self._get_feature_value_units(feature, raise_if_unknown_unit=raise_if_unknown_unit)
         return units, units_attr
 
+    def get_quantity_or_units(self, feature: Union[syside.Feature, syside.Expression], raise_if_unknown_unit=True) -> Optional[Union[Quantity, Unit]]:
+        """
+        Gets the set feature value and loads it as a quantity or units, depending on what was set.
+        """
+
+        # Try to load the value as a quantity
+        try:
+            quantity = self.get_quantity(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            if quantity is not None:
+                return quantity
+        except ValueError:  # No quantity feature value set
+            pass
+
+        # Try to load the value as a units literal
+        try:
+            units, _ = self.get_units(feature, raise_if_unknown_unit=raise_if_unknown_unit)
+            if units is not None:
+                return units
+        except ValueError:  # No feature value set
+            pass
+
     def _get_feature_value_units(self, feature: Union[syside.Feature, syside.Expression], raise_if_unknown_unit=True) \
             -> Tuple[Optional[syside.Expression], bool, Optional[Unit], Optional[syside.AttributeUsage]]:
         """
@@ -278,7 +299,7 @@ class SysMLUnitsHelper(SysMLCompoundUnitsHelper):
 
             # Save original units if the unit could not exactly be reconstructed (and the feature is not anonymous)
             if scale != 1 and feature.name:
-                self.set_units_doc(units)
+                self.set_units_doc(feature)
             else:
                 self._remove_units_doc(feature)
 

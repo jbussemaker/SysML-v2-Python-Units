@@ -7,6 +7,8 @@
 Convert units and quantities between standard [SysML v2](https://www.omg.org/sysml/sysmlv2/) and Python with
 [Syside Automator](https://docs.sensmetry.com/automator/) and [Pint](https://pint.readthedocs.io/).
 
+Python API capabilities:
+
 - Get/set quantity* as `attribute` value, specified using Pint `Quantity` objects
 - Get/set unit as `attribute` value, specified using Pint `Unit` objects
 - Supports numerical values, as well as `inf` (`*` in SysML v2) and `NaN` (set as `null` in SysML v2)
@@ -26,6 +28,15 @@ Note: this package uses [Syside Automator](https://docs.sensmetry.com/automator/
 Syside Automator is commercial software, so you have to obtain a license first.
 For academic uses you can request an [academic license](https://sensmetry.com/syside-pricing/).
 
+Command line interface (CLI):
+
+- `parse`: parse quantity or units and get information about it
+- `get`: get the quantity or units assigned to a model element
+- `set`: set a quantity or units to a model element
+- `convert`: convert the quantity or units assigned to a model element to different units
+- `list_units`: list all available (directly-mappable, non-compound) units
+- `list_quantity_types`: list all available quantity types (e.g. length, mass, speed, etc.)
+
 ## Installation
 
 1. Install the package from PyPI:
@@ -38,6 +49,7 @@ For academic uses you can request an [academic license](https://sensmetry.com/sy
 ## Usage
 
 Refer to [the documentation](https://github.com/jbussemaker/SysML-v2-Python-Units/blob/main/documentation.ipynb).
+Coverts both the Python API and CLI.
 
 ## Citing
 
@@ -62,3 +74,10 @@ Contributions are appreciated too:
   - Add tests and make sure they pass (tests are run using `pytest`)
 - Sign a Contributor License Agreement (CLA): *please contact me for the template*
 - Issue a pull request
+
+Before running the documentation notebook, force Python to use utf-8 output:
+```
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+jupyter notebook
+```

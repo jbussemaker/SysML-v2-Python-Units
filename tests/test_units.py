@@ -4,6 +4,7 @@ import syside
 import pathlib
 from typing import List
 from pint import OffsetUnitCalculusError
+from sysmlv2_units.helper import SysMLHelper
 from sysmlv2_units import SysMLUnitsHelper, UndefinedUnitError, ureg
 from sysmlv2_units.converter import CustomUndefinedUnitError
 
@@ -23,11 +24,7 @@ def _reset_caches():
 
 @pytest.fixture
 def empty_sysml_model():
-    model, _ = syside.load_model([])
-    model.documents.append(syside.Document.create_st(
-        syside.DocumentOptions(url=syside.Url('memory://new'), language='sysml'),
-    ))
-    return model
+    return SysMLHelper.create_empty_model()
 
 
 @pytest.fixture
@@ -97,6 +94,61 @@ def test_python_units(empty_sysml_model):
             pp_sysml = f'{pint_units:S}'
             assert units_helper.units_to_str(pp_sysml, sysml_style=True) == pp_sysml
             assert units_helper.units_to_str(pint_units, sysml_style=True) == pp_sysml
+
+
+def test_python_quantities(empty_sysml_model):
+    units_helper = SysMLUnitsHelper(empty_sysml_model)
+
+    # Test parsing into pint Unit objects
+    assert units_helper.parse_python_quantity('') == ureg('')
+    assert units_helper.parse_python_quantity(units_helper.dimensionless_units_pint) == ureg('1')
+    assert units_helper.parse_python_quantity('1') == ureg('1')
+    assert units_helper.parse_python_quantity(ureg.m) == ureg('1 m')
+
+    assert units_helper.parse_python_quantity('m') == ureg('1 m')
+    assert units_helper.parse_python_quantity('') == ureg('')
+
+    assert units_helper.parse_python_quantity('%') == ureg('1 %')
+
+    assert units_helper.units_to_str(ureg('1 m')) == '1 m'
+    assert units_helper.units_to_str(ureg('3.14 m/s')) == '3.14 m/s'
+
+    # Test parsing an unknown units
+    with pytest.raises(UndefinedUnitError):
+        units_helper.parse_python_quantity('blabla')
+    assert units_helper.parse_python_quantity('blabla', raise_if_unknown_unit=False) is None
+
+    with pytest.raises(UndefinedUnitError):
+        units_helper.parse_python_quantity('m/s^')
+    assert units_helper.parse_python_quantity('m/s^', raise_if_unknown_unit=False) is None
+
+    # Test parsing compound units
+    assert units_helper.parse_python_quantity('m/s') == ureg('m/s')
+    assert units_helper.parse_python_quantity('m/s**2') == ureg('m/s^2')
+    assert units_helper.parse_python_quantity('m⋅s⁻²') == ureg('m/s^2')
+
+    # Test parsing pretty-printer units
+    for pint_units_ in ureg:
+        for append in ['', '/s**2']:
+            if pint_units_+append in _skip_pretty_print_parsing:
+                continue
+
+            # Check if the pint unit can be converted to SysML units
+            try:
+                pint_quantity = ureg('1 '+pint_units_+append)
+            except OffsetUnitCalculusError:
+                continue
+
+            pretty_printed = f'{pint_quantity:~P}'
+            parsed_pint_quantity = units_helper.parse_python_quantity(pretty_printed)
+            assert parsed_pint_quantity == pint_quantity
+
+            assert units_helper.units_to_str(pretty_printed) == pretty_printed
+            assert units_helper.units_to_str(pint_quantity) == pretty_printed
+
+            pp_sysml = f'{pint_quantity:S}'
+            assert units_helper.units_to_str(pp_sysml, sysml_style=True) == pp_sysml
+            assert units_helper.units_to_str(pint_quantity, sysml_style=True) == pp_sysml
 
 
 def test_pint_sysml_printing():
@@ -279,6 +331,22 @@ def test_reference_printer(empty_sysml_model):
         assert sysml_text.strip() == 'attribute mass = 3.14 [SI::kg];'
 
 
+def test_quantity_values_units(empty_sysml_model):
+    units_helper = SysMLUnitsHelper(empty_sysml_model)
+
+    for units in units_helper.get_mapped_units():
+        units_attr = units_helper.get_sysml_units(units)
+        assert units_attr is not None
+
+        quantity_value_key = units_helper.get_units_quantity_value(units_attr)
+        assert quantity_value_key is not None
+
+        quantity_values = units_helper.get_concrete_quantity_values(quantity_value_key)
+        assert len(quantity_values) > 0
+
+        print(f'{units} --> {quantity_value_key} --> {quantity_values}')
+
+
 def test_get_quantity(units_tests_model):
     units_helper = SysMLUnitsHelper(units_tests_model)
 
@@ -292,78 +360,93 @@ def test_get_quantity(units_tests_model):
             assert attr.name == 'intNoUnits'
             assert units_helper.get_units(attr)[0] is None
             assert units_helper.get_quantity(attr) == units_helper.quantity(1.0)
+            assert units_helper.get_quantity_or_units(attr) == units_helper.quantity(1.0)
 
             attr = elements[4]
             assert attr.name == 'rationalNoUnits'
             assert units_helper.get_units(attr) == (None, None)
             assert units_helper.get_quantity(attr) == units_helper.quantity(1.0)
+            assert units_helper.get_quantity_or_units(attr) == units_helper.quantity(1.0)
 
             attr = elements[5]
             assert attr.name == 'mass1'
             assert units_helper.get_units(attr) == (ureg.kg, units_helper.get_sysml_units(ureg.kg))
             assert units_helper.get_quantity(attr) == ureg.Quantity(1.0, ureg.kg)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(1.0, ureg.kg)
 
             attr = elements[6]
             assert attr.name == 'mass2'
             assert units_helper.get_units(attr)[0] == ureg.kg
             assert units_helper.get_quantity(attr) == ureg.Quantity(1.0, ureg.kg)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(1.0, ureg.kg)
 
             attr = elements[7]
             assert attr.name == 'mass3'
             assert units_helper.get_units(attr)[0] == ureg.kg
             assert units_helper.get_quantity(attr) == ureg.Quantity(1.0, ureg.kg)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(1.0, ureg.kg)
 
             attr = elements[8]
             assert attr.name == 'massFlow'
             assert units_helper.get_units(attr)[0]*1 == ureg('kg/s')
             assert units_helper.get_quantity(attr) == ureg('1.5 kg/s')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('1.5 kg/s')
 
             attr = elements[9]
             assert attr.name == 'speedDef'
             assert units_helper.get_units(attr)[0]*1 == ureg('m/s')
             assert units_helper.get_units(attr)[1] == units_helper.get_sysml_units('m/s')
             assert units_helper.get_quantity(attr) == ureg('1 m/s')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('1 m/s')
 
             attr = elements[10]
             assert attr.name == 'speedAdhoc'
             assert units_helper.get_units(attr)[0]*1 == ureg('m/s')
             assert units_helper.get_units(attr)[1] is None
             assert units_helper.get_quantity(attr) == ureg('1 m/s')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('1 m/s')
 
             attr = elements[11]
             assert attr.name == 'speedKph'
             assert units_helper.get_units(attr)[0]*1 == ureg('km/h')
             assert units_helper.get_quantity(attr) == ureg('1 km/h')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('1 km/h')
 
             attr = elements[12]
             assert attr.name == 'pressureUS'
             assert units_helper.get_units(attr)[0]*1 == ureg('psi')
             assert units_helper.get_quantity(attr) == ureg('100 psi')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('100 psi')
 
             attr = elements[13]
             assert attr.name == 'pressureSI'
             assert units_helper.get_units(attr)[0]*1 == ureg('Pa')
             assert units_helper.get_quantity(attr) == ureg('100 Pa')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('100 Pa')
 
             attr = elements[14]
             assert attr.name == 'pressureAdhoc'
             assert units_helper.get_units(attr)[0]*1 == ureg('Pa')
             assert units_helper.get_quantity(attr) == ureg('100 Pa')
+            assert units_helper.get_quantity_or_units(attr) ==  ureg('100 Pa')
 
             attr = elements[15]
             assert attr.name == 'tempShort'
             assert units_helper.get_units(attr)[0]*1 == ureg('degC')
             assert units_helper.get_quantity(attr) == ureg.Quantity(100, ureg.degC)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(100, ureg.degC)
 
             attr = elements[16]
             assert attr.name == 'tempDeltaShort'
             assert units_helper.get_units(attr)[0]*1 == ureg('delta_degC')
             assert units_helper.get_quantity(attr) == ureg.Quantity(100, ureg.delta_degC)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(100, ureg.delta_degC)
 
             attr = elements[17]
             assert attr.name == 'tempLong'
             assert units_helper.get_units(attr)[0]*1 == ureg('degC')
             assert units_helper.get_quantity(attr) == ureg.Quantity(100, ureg.degC)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(100, ureg.degC)
 
             attr = elements[18]
             assert attr.name == 'btuAttr'
@@ -375,36 +458,45 @@ def test_get_quantity(units_tests_model):
             with pytest.raises(UndefinedUnitError):
                 assert units_helper.get_quantity(attr)
             assert units_helper.get_quantity(attr, raise_if_unknown_unit=False) == ureg.Quantity(10.)
+            with pytest.raises(UndefinedUnitError):
+                assert units_helper.get_quantity_or_units(attr)
+            assert units_helper.get_quantity_or_units(attr, raise_if_unknown_unit=False) == ureg.Quantity(10.)
 
             attr = elements[19]
             assert attr.name == 'negativeValNoUnits'
             assert units_helper.get_units(attr) == (None, None)
             assert units_helper.get_quantity(attr) == ureg.Quantity(-5)
+            assert units_helper.get_quantity_or_units(attr) ==  ureg.Quantity(-5)
 
             attr = elements[20]
             assert attr.name == 'negativeVal'
             assert units_helper.get_units(attr)[0] == ureg.kg
             assert units_helper.get_quantity(attr) == ureg.Quantity(-5, ureg.kg)
+            assert units_helper.get_quantity_or_units(attr) == ureg.Quantity(-5, ureg.kg)
 
             attr = elements[21]
             assert attr.name == 'adhocQual'
             assert units_helper.get_units(attr)[0]*1 == ureg('kg/s')
             assert units_helper.get_quantity(attr) == ureg('5 kg/s')
+            assert units_helper.get_quantity_or_units(attr) == ureg('5 kg/s')
 
             attr = elements[22]
             assert attr.name == 'adhocQualLong'
             assert units_helper.get_units(attr)[0]*1 == ureg('kg*m/s')
             assert units_helper.get_quantity(attr) == ureg('-5 kg*m/s')
+            assert units_helper.get_quantity_or_units(attr) == ureg('-5 kg*m/s')
 
             attr = elements[23]
             assert attr.name == 'adhocQualPower'
             assert units_helper.get_units(attr)[0]*1 == ureg('m/s^2')
             assert units_helper.get_quantity(attr) == ureg('10.0 m/s^2')
+            assert units_helper.get_quantity_or_units(attr) == ureg('10.0 m/s^2')
 
             attr = elements[24]
             assert attr.name == 'infValueNoUnit'
             assert units_helper.get_units(attr)[0] is None
             assert units_helper.get_quantity(attr) == ureg.Quantity(math.inf)
+            assert units_helper.get_quantity_or_units(attr) == ureg.Quantity(math.inf)
 
             attr = elements[25]
             assert attr.name == 'nanValueNoUnit'
@@ -412,11 +504,13 @@ def test_get_quantity(units_tests_model):
             quantity = units_helper.get_quantity(attr)
             assert math.isnan(quantity.magnitude)
             assert quantity.units == ureg.dimensionless
+            assert math.isnan(units_helper.get_quantity_or_units(attr).magnitude)
 
             attr = elements[26]
             assert attr.name == 'infValue'
             assert units_helper.get_units(attr)[0] == ureg.kg
             assert units_helper.get_quantity(attr) == ureg.Quantity(math.inf, ureg.kg)
+            assert units_helper.get_quantity_or_units(attr) == ureg.Quantity(math.inf, ureg.kg)
 
             attr = elements[27]
             assert attr.name == 'nanValue'
@@ -424,38 +518,45 @@ def test_get_quantity(units_tests_model):
             quantity = units_helper.get_quantity(attr)
             assert math.isnan(quantity.magnitude)
             assert quantity.units == ureg.kg
+            assert math.isnan(units_helper.get_quantity_or_units(attr).magnitude)
 
             attr = elements[28]
             assert attr.name == 'wrappedNegativeValue'
             assert units_helper.get_units(attr)[0] == ureg.m
             assert units_helper.get_quantity(attr) == ureg('-15 m')
+            assert units_helper.get_quantity_or_units(attr) == ureg('-15 m')
 
             attr = elements[29]
             assert attr.name == 'units'
             assert units_helper.get_units(attr) == (ureg.kg, units_helper.get_sysml_units('kg'))
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg.kg
 
             attr = elements[30]
             assert attr.name == 'attrRefUnits'
             assert units_helper.get_units(attr) == (ureg.kg, elements[29])
             assert units_helper.get_quantity(attr) == ureg('10 kg')
+            assert units_helper.get_quantity_or_units(attr) == ureg('10 kg')
 
             attr = elements[31]
             assert attr.name == 'aliasUnits'
             assert units_helper.get_units(attr) == (ureg.nmi, units_helper.get_sysml_units('nmi'))
             assert units_helper.get_quantity(attr) == ureg('50 nmi')
+            assert units_helper.get_quantity_or_units(attr) == ureg('50 nmi')
 
             attr = elements[32]
             assert attr.name == 'units2'
             assert units_helper.get_units(attr) == (ureg.nmi, units_helper.get_sysml_units('nmi'))
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg.nmi
 
             attr = elements[33]
             assert attr.name == 'aliasRefUnits'
             assert units_helper.get_units(attr) == (ureg.nmi, elements[32])
             assert units_helper.get_quantity(attr) == ureg('25 nmi')
+            assert units_helper.get_quantity_or_units(attr) == ureg('25 nmi')
 
             attr = elements[34]
             assert attr.name == 'foot'
@@ -467,11 +568,13 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg.ft, units_helper.get_sysml_units('ft'))
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg.ft
 
             attr = elements[35]
             assert attr.name == 'aliasRefUnits2'
             assert units_helper.get_units(attr) == (ureg.ft, units_helper.get_sysml_units('ft'))
             assert units_helper.get_quantity(attr) == ureg('26 ft')
+            assert units_helper.get_quantity_or_units(attr) == ureg('26 ft')
 
             attr = elements[36]
             assert attr.name == 'units4'
@@ -479,11 +582,13 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg.m, units_helper.get_sysml_units('m'))
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg.m
 
             attr = elements[37]
             assert attr.name == 'subsetUnits'
             assert units_helper.get_units(attr) == (ureg.m, elements[36])
             assert units_helper.get_quantity(attr) == ureg('30 m')
+            assert units_helper.get_quantity_or_units(attr) == ureg('30 m')
 
             attr = elements[38]
             assert attr.name == 'adhocUnits'
@@ -491,11 +596,13 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('m/s').units, None)
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg('m/s').units
 
             attr = elements[39]
             assert attr.name == 'adhocValue'
             assert units_helper.get_units(attr) == (ureg('m/s').units, elements[38])
             assert units_helper.get_quantity(attr) == ureg('22 m/s')
+            assert units_helper.get_quantity_or_units(attr) == ureg('22 m/s')
 
             attr = elements[40]
             assert attr.name == 'massValue'
@@ -504,6 +611,7 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg.kg, None)
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg.kg
 
             attr = elements[41]
             assert attr.name == 'speedValue'
@@ -512,6 +620,7 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('m/s').units, None)
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg('m/s').units
 
             attr = elements[42]
             assert attr.name == 'soundValue'
@@ -520,6 +629,7 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr)[0] is None
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) is None
 
             attr = elements[43]
             assert attr.name == 'assignedMassValue'
@@ -527,6 +637,7 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_quantity_value_units(attr) == ureg.kg
             assert units_helper.get_units(attr) == (ureg.g, units_helper.get_sysml_units('g'))
             assert units_helper.get_quantity(attr) == ureg('100 g')
+            assert units_helper.get_quantity_or_units(attr) == ureg('100 g')
 
             attr = elements[44]
             assert attr.name == 'adhocComplexUnits'
@@ -534,58 +645,68 @@ def test_get_quantity(units_tests_model):
             assert units_helper.get_units(attr) == (ureg('K*kg*s**2/m**3').units, None)
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg('K*kg*s**2/m**3').units
 
             attr = elements[45]
             assert attr.name == 'adhocComplexQuantity'
             assert units_helper.is_typed_by_quantity_value(attr)
             assert units_helper.get_units(attr) == (ureg('K*kg*s**2/m**3').units, None)
             assert units_helper.get_quantity(attr) == ureg('3.14 K*kg*s**2/m**3')
+            assert units_helper.get_quantity_or_units(attr) == ureg('3.14 K*kg*s**2/m**3')
 
             attr = elements[46]
             assert attr.name == 'energyUsage'
             assert units_helper.is_typed_by_quantity_value(attr)
             assert units_helper.get_units(attr) == (ureg('kW*h').units, None)
             assert units_helper.get_quantity(attr) == ureg('1 kWh')
+            assert units_helper.get_quantity_or_units(attr) == ureg('1 kWh')
 
             attr = elements[47]
             assert attr.name == 'energyPrefix'
             assert units_helper.is_typed_by_quantity_value(attr)
             assert units_helper.get_units(attr) == (ureg('kW*h').units, None)
             assert units_helper.get_quantity(attr) == ureg('1 kWh')
+            assert units_helper.get_quantity_or_units(attr) == ureg('1 kWh')
 
             attr = elements[48]
             assert attr.name == 'percentage'
             assert units_helper.is_typed_by_quantity_value(attr)
             assert units_helper.get_units(attr) == (ureg('%').units, None)
             assert units_helper.get_quantity(attr) == ureg('3.14 %')
+            assert units_helper.get_quantity_or_units(attr) == ureg('3.14 %')
 
             attr = elements[49]
             assert attr.name == 'tsfc'
             assert units_helper.is_typed_by_quantity_value(attr)
             assert units_helper.get_units(attr) == (ureg('g/(kN*s)').units, None)
             assert units_helper.get_quantity(attr) == ureg('5 g/(kN*s)')
+            assert units_helper.get_quantity_or_units(attr) == ureg('5 g/(kN*s)')
 
             attr = elements[50]
             assert attr.name == 'strUnits'
             assert units_helper.get_units(attr) == (ureg('pixel').units, None)
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg('pixel').units
 
             attr = elements[51]
             assert attr.name == 'docUnits'
             assert units_helper.get_units(attr) == (ureg('pixel').units, None)
             with pytest.raises(ValueError):
                 assert units_helper.get_quantity(attr)
+            assert units_helper.get_quantity_or_units(attr) == ureg('pixel').units
 
             attr = elements[52]
             assert attr.name == 'strQuantity'
             assert units_helper.get_units(attr) == (ureg('pixel').units, None)
             assert units_helper.get_quantity(attr) == ureg('3.14 pixel')
+            assert units_helper.get_quantity_or_units(attr) == ureg('3.14 pixel')
 
             attr = elements[53]
             assert attr.name == 'docQuantity'
             assert units_helper.get_units(attr) == (ureg('pixel').units, None)
             assert units_helper.get_quantity(attr) == ureg('96 pixel')
+            assert units_helper.get_quantity_or_units(attr) == ureg('96 pixel')
 
             attr = elements[54]
             assert attr.name == 'yearValue'
@@ -593,6 +714,7 @@ def test_get_quantity(units_tests_model):
             q = units_helper.get_quantity(attr)
             assert q == ureg('20 year')
             assert str(q) == '20.0 year'
+            assert units_helper.get_quantity_or_units(attr) == ureg('20 year')
 
 
 def test_set_quantity(units_tests_model):
