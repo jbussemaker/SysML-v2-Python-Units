@@ -295,7 +295,7 @@ class SysMLUnitsConverter:
         """
 
         # Catch empty units
-        if not units:
+        if units is None or units == '':
             return ''
 
         # Try to convert SysML units to Pint units for normalization
