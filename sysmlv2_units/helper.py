@@ -82,7 +82,7 @@ class SysMLHelper:
         """
         files = syside.collect_files_recursively(workspace_dir)
         try:
-            model, diagnostics = syside.try_load_model(files)
+            model, diagnostics = syside.try_load_model(files, attach_comments=True)
         except (syside.ModelError, RuntimeError):
             raise
 
